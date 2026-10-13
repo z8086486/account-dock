@@ -97,3 +97,5 @@ __pycache__/
 !/ISOLATION.md
 
 !/Sources/AccountDock/VSCodeEnvironment.swift
+
+!/CHATGPT_INTEGRATION.md

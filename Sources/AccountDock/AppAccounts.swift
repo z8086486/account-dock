@@ -157,7 +157,14 @@ struct AppAccountCard: View {
             if accounts.isEmpty {
                 Text("계정 확인 전").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
             }
-            Text("현재 연결 계정").font(.system(size: 11, weight: .semibold)).foregroundStyle(DockTheme.muted)
+            if !canSwitch {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("앱 로그인 · 확인 필요").font(.system(size: 13, weight: .semibold))
+                    Text("\(switchExplanation)").font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Text(canSwitch ? "현재 연결 계정" : "Codex 저장소 정보 · 참고용").font(.system(size: 11, weight: .semibold)).foregroundStyle(DockTheme.muted)
             ForEach(displayedAccounts) { account in
                 VStack(alignment: .leading, spacing: 6) {
                     if account.product == "codex" {
@@ -189,6 +196,7 @@ struct AppAccountCard: View {
                 Button("테마·대화 연결 후 열기", action: onConnectEnvironment)
                     .buttonStyle(DockButtonStyle()).disabled(busy)
             }
+            if canSwitch {
             Divider().opacity(0.4)
             HStack {
                 Text("바꿀 계정 선택").font(.system(size: 12, weight: .semibold))
@@ -232,6 +240,7 @@ struct AppAccountCard: View {
                 }
             }.buttonStyle(DockButtonStyle(kind: .primary))
                 .disabled(busy || !canSwitch || selected == nil)
+            }
             Spacer(minLength: 0)
         }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(.white, in: RoundedRectangle(cornerRadius: 16))

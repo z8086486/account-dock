@@ -506,9 +506,9 @@ struct Dashboard: View {
                 AppAccountCard(title: "ChatGPT", icon: "bubble.left.and.bubble.right",
                     installed: updates.products.first { $0.id == "chatgpt" }?.installed,
                     accounts: model.appAccounts.filter { $0.product == "chatgpt" },
-                    presets: model.presets, busy: model.busy || model.refreshingUsage, canSwitch: true,
-                    switchExplanation: "ChatGPT의 Codex 인증을 전환합니다. 기존 VS Code·CLI와 공유되어 함께 변경될 수 있으며, 일반 ChatGPT 대화 로그인은 별도입니다.",
-                    onSwitch: { preset in pendingPreset = preset; switchTarget = "ChatGPT · Codex 공유 인증"; showSwitch = true }, onAdd: { newAccountName = ""; showAdd = true })
+                    presets: model.presets, busy: model.busy || model.refreshingUsage, canSwitch: false,
+                    switchExplanation: "앱 로그인 직접 조회·전환은 아직 연결되지 않았습니다. 아래 정보는 내부 Codex 저장소이며 앱 로그인 계정을 대신하지 않습니다. 공유 인증 변경은 저장한 계정의 고급 관리에서 가능합니다.",
+                    onSwitch: { _ in }, onAdd: { newAccountName = ""; showAdd = true })
                 AppAccountCard(title: "VS Code · Codex", icon: "chevron.left.forwardslash.chevron.right",
                     installed: updates.products.first { $0.id == "codex" }?.installed,
                     accounts: model.appAccounts.filter { $0.product == "codex" },
