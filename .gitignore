@@ -11,6 +11,7 @@
 !/Sources/AccountDock/
 /Sources/AccountDock/*
 !/Sources/AccountDock/main.swift
+!/Sources/AccountDock/AccountStore.swift
 
 /scripts/*
 !/scripts/doctor.py
@@ -44,3 +45,8 @@ credentials.json
 dist/
 __pycache__/
 *.pyc
+
+# Reviewed Swift tests.
+!/tests/AccountDockTests/
+/tests/AccountDockTests/*
+!/tests/AccountDockTests/PresetTests.swift
