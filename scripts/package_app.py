@@ -50,9 +50,11 @@ def main():
         (contents / name).mkdir(parents=True)
     shutil.copy2(binary_dir / 'AccountDock', contents / 'MacOS/AccountDock')
     shutil.copytree(binary_dir / 'Sparkle.framework', contents / 'Frameworks/Sparkle.framework', symlinks=True)
-    for script in ['doctor.py', 'versions.py']:
+    for script in ['doctor.py', 'versions.py', 'usage.py']:
         shutil.copy2(ROOT / 'scripts' / script, contents / 'Resources' / script)
     shutil.copy2(MANIFEST, contents / 'Resources/release.json')
+    for asset in ['AppIcon.icns', 'AccountDock.png']:
+        shutil.copy2(MANIFEST.parent / asset, contents / 'Resources' / asset)
     for bundle in binary_dir.glob('AccountDock_AccountDock.bundle'):
         shutil.copytree(bundle, contents / 'Resources' / bundle.name, symlinks=True)
     license_path = ROOT / '.build/checkouts/Sparkle/LICENSE'
@@ -64,7 +66,7 @@ def main():
             'CFBundleDisplayName': 'Account Dock', 'CFBundleExecutable': 'AccountDock',
             'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': release['version'],
             'CFBundleVersion': str(release['build']), 'LSMinimumSystemVersion': release['minimumMacOS'],
-            'NSHighResolutionCapable': True}
+            'NSHighResolutionCapable': True, 'CFBundleIconFile': 'AppIcon'}
     if signed:
         info.update({'SUFeedURL': FEED, 'SUPublicEDKey': args.sparkle_public_key,
                      'SUEnableAutomaticChecks': False, 'SUAutomaticallyUpdate': False,

@@ -68,3 +68,12 @@ __pycache__/
 !/.github/workflows/
 /.github/workflows/*
 !/.github/workflows/preview.yml
+
+# Reviewed account onboarding, usage, and original app icon.
+!/Sources/AccountDock/Setup.swift
+!/Sources/AccountDock/Usage.swift
+!/Sources/AccountDock/Resources/AppIcon.icns
+!/Sources/AccountDock/Resources/AccountDock.png
+!/scripts/usage.py
+!/scripts/generate_icon.swift
+!/tests/test_usage.py

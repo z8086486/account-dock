@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "version": "0.3.0",
-  "build": 3,
+  "version": "0.4.0",
+  "build": 4,
   "channel": "preview",
   "minimumMacOS": "14.0",
   "repository": "z8086486/account-dock",
@@ -12,7 +12,7 @@
     },
     "codex": {
       "versions": ["26.1007.21434"],
-      "scope": "공유 저장소 계정 조회 확인 · 독립 전환은 미검증"
+      "scope": "계정·사용량 조회 확인 · 독립 전환은 미검증"
     }
   }
 }

@@ -65,7 +65,7 @@ final class UpdateCenter: ObservableObject {
         guard let script else { throw DockError.message("Version tool missing") }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        var arguments = ["python3", script, "--manifest", ReleaseConfiguration.url.path]
+        var arguments = ["python3", "-B", script, "--manifest", ReleaseConfiguration.url.path]
         if online { arguments.append("--online") }
         if let update { arguments += ["--update-codex", update] }
         task.arguments = arguments

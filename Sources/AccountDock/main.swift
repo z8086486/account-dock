@@ -3,6 +3,10 @@ import SwiftUI
 @main
 struct AccountDockApp: App {
     @StateObject private var updates = UpdateCenter()
+    init() {
+        if let url = Bundle.module.url(forResource: "AccountDock", withExtension: "png"),
+           let image = NSImage(contentsOf: url) { NSApplication.shared.applicationIconImage = image }
+    }
     var body: some Scene {
         WindowGroup("Account Dock") { Dashboard().environmentObject(updates) }
             .windowStyle(.hiddenTitleBar)
@@ -20,6 +24,10 @@ final class DockModel: ObservableObject {
     @Published var busy = false
     @Published var message: String?
     @Published var lastChecked: Date?
+    @Published var activeAccountID: String?
+    @Published var usage: [String: UsageReport] = [:]
+    @Published var usageLoading: Set<String> = []
+    @Published var refreshingUsage = false
     private var process: Process?
     var connected: Bool { report?.codex.status == "cached_account" }
     var supportsPresets: Bool { report?.file_presets_supported == true && report?.codex.type == "chatgpt" }
@@ -39,12 +47,14 @@ final class DockModel: ObservableObject {
             if updated.codex.status == "error" || updated.codex.status == "unavailable" {
                 message = "계정을 확인하지 못했습니다. Codex 설치 및 로그인 상태를 확인하고 다시 시도해 주세요."
                 report = updated
+                activeAccountID = nil
                 return
             }
             report = action == "status" ? updated : try await run("status")
             lastChecked = Date()
-            if action != "status" { message = action == "login" ? "로그인이 완료되었습니다." : "공유 저장소에서 로그아웃했습니다. 저장된 프리셋은 유지됩니다." }
-        } catch { report = nil; message = error.localizedDescription }
+            registerCurrentAccount()
+            if action != "status" { message = action == "login" ? "로그인이 완료되었습니다." : "공유 저장소에서 로그아웃했습니다. 저장한 계정은 유지됩니다." }
+        } catch { report = nil; activeAccountID = nil; message = error.localizedDescription }
     }
     func cancel() { process?.terminate() }
     private func run(_ action: String) async throws -> AccountReport {
@@ -54,7 +64,7 @@ final class DockModel: ObservableObject {
         }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = ["python3", script, "--show-email", "--action", action]
+        task.arguments = ["python3", "-B", script, "--show-email", "--action", action, "--codex-home", AccessSetup.home]
         let output = Pipe()
         task.standardOutput = output
         task.standardError = FileHandle.nullDevice
@@ -83,12 +93,12 @@ final class DockModel: ObservableObject {
             return
         }
         do {
-            let credential = try PresetVault.credential(at: report.codex_home)
+            let credential = try PresetVault.credential(at: report.codex_home, expectedEmail: email)
             let preset = AccountPreset(id: UUID().uuidString, name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                                        email: email, plan: report.codex.plan, savedAt: Date(), credential: credential)
-            try PresetVault.save(preset)
+            try PresetVault.upsert(preset, preserveName: false)
             loadPresets()
-            message = "프리셋을 이 Mac의 Keychain에 저장했습니다."
+            message = "저장한 계정을 이 Mac의 Keychain에 저장했습니다."
         } catch { message = error.localizedDescription }
     }
     func activate(_ preset: AccountPreset) async {
@@ -107,18 +117,47 @@ final class DockModel: ObservableObject {
                     return
                 }
                 let backup = AccountPreset(id: UUID().uuidString, name: "전환 전 자동 백업", email: email,
-                    plan: report.codex.plan, savedAt: Date(), credential: try PresetVault.credential(at: report.codex_home))
-                try PresetVault.save(backup)
+                    plan: report.codex.plan, savedAt: Date(), credential: try PresetVault.credential(at: report.codex_home, expectedEmail: email))
+                try PresetVault.upsert(backup)
             }
-            try PresetVault.restore(preset, home: report.codex_home)
+            let latest = presets.first { $0.id == preset.id } ?? preset
+            try PresetVault.restore(latest, home: report.codex_home)
             loadPresets()
             await request()
             if self.report?.codex.status == "cached_account", self.report?.codex.email == preset.email {
-                message = "프리셋을 공유 저장소에 적용했습니다. 앱에서 다시 확인해 주세요. 인증이 만료되었다면 재로그인이 필요합니다."
+                message = "저장한 계정을 공유 저장소에 적용했습니다. 앱에서 다시 확인해 주세요. 인증이 만료되었다면 재로그인이 필요합니다."
             } else {
                 message = "파일은 적용했지만 계정 확인에 실패했습니다. 전환 전 자동 백업을 선택해 복원할 수 있습니다."
             }
         } catch { message = error.localizedDescription }
+    }
+    func registerCurrentAccount() {
+        activeAccountID = nil
+        guard let report, connected, supportsPresets, let email = report.codex.email else { return }
+        do {
+            let credential = try PresetVault.credential(at: report.codex_home, expectedEmail: email)
+            let entry = AccountPreset(id: UUID().uuidString,
+                name: String(email.split(separator: "@").first ?? "계정"), email: email,
+                plan: report.codex.plan, savedAt: Date(), credential: credential)
+            activeAccountID = try PresetVault.upsert(entry).id
+            loadPresets()
+        } catch { message = "현재 계정을 자동 등록하지 못했습니다. 접근 및 개인정보 화면에서 Keychain 접근을 확인해 주세요." }
+    }
+    func refreshUsage() async {
+        guard !refreshingUsage else { return }
+        guard UserDefaults.standard.object(forKey: "accountDock.usageEnabled") as? Bool ?? true else {
+            usage = [:]
+            return
+        }
+        refreshingUsage = true
+        defer { refreshingUsage = false }
+        for account in presets {
+            guard UserDefaults.standard.object(forKey: "accountDock.usageEnabled") as? Bool ?? true else { break }
+            usageLoading.insert(account.id)
+            do { usage[account.id] = try await UsageReader.read(account.credential) }
+            catch { usage[account.id] = UsageReport(status: "unavailable", windows: [], activity: [:], checkedAt: nil) }
+            usageLoading.remove(account.id)
+        }
     }
     func remove(_ preset: AccountPreset) {
         do { try PresetVault.delete(preset.id); loadPresets() }
@@ -130,6 +169,8 @@ struct Dashboard: View {
     @StateObject private var model = DockModel()
     @EnvironmentObject private var updates: UpdateCenter
     @State private var selection = "accounts"
+    @AppStorage("accountDock.setupCompleted.v1") private var setupCompleted = false
+    @State private var showSetup = false
     @State private var showSave = false
     @State private var presetName = ""
     @State private var pendingPreset: AccountPreset?
@@ -160,40 +201,55 @@ struct Dashboard: View {
                         overview
                         targets
                         presetSection
-                    } else if selection == "updates" { UpdatePanel(center: updates) } else { presetSection }
+                    } else if selection == "updates" { UpdatePanel(center: updates) } else if selection == "access" { SetupPanel() } else { presetSection }
                     footer
                 }.padding(32)
             }.background(DockTheme.canvas)
         }
         .foregroundStyle(ink).tint(accent).preferredColorScheme(.light)
         .frame(minWidth: 1020, minHeight: 780)
-        .task { model.loadPresets(); await model.request(); await updates.refresh() }
+        .task {
+            if setupCompleted { await start() } else { showSetup = true }
+        }
+        .sheet(isPresented: $showSetup) {
+            SetupPanel(firstLaunch: true) {
+                setupCompleted = true; showSetup = false
+                Task { await start() }
+            }.frame(width: 660, height: 650).interactiveDismissDisabled()
+        }
         .sheet(isPresented: $showSave) { saveSheet }
         .alert("공유 저장소에서 로그아웃할까요?", isPresented: $showLogout) {
             Button("취소", role: .cancel) {}
             Button("로그아웃", role: .destructive) { Task { await model.request("logout") } }
-        } message: { Text("같은 저장소를 사용하는 ChatGPT, VS Code, Codex CLI에 영향을 줄 수 있습니다. 저장된 프리셋은 유지됩니다.") }
-        .alert("이 프리셋으로 전환할까요?", isPresented: $showSwitch, presenting: pendingPreset) { preset in
+        } message: { Text("같은 저장소를 사용하는 ChatGPT, VS Code, Codex CLI에 영향을 줄 수 있습니다. 저장한 계정은 유지됩니다.") }
+        .alert("이 계정으로 전환할까요?", isPresented: $showSwitch, presenting: pendingPreset) { preset in
             Button("취소", role: .cancel) {}
             Button("전환") { Task { await model.activate(preset) } }
         } message: { _ in Text("현재 계정은 Keychain에 자동 백업합니다. 공유 저장소를 사용하는 앱에 함께 적용되며, 만료된 인증은 다시 로그인해야 합니다.") }
-        .alert("프리셋을 삭제할까요?", isPresented: $showDelete, presenting: pendingDelete) { preset in
+        .alert("저장한 계정을 삭제할까요?", isPresented: $showDelete, presenting: pendingDelete) { preset in
             Button("취소", role: .cancel) {}
             Button("삭제", role: .destructive) { model.remove(preset) }
-        } message: { _ in Text("Keychain에 저장한 이 프리셋의 인증 정보가 삭제됩니다. 현재 로그인에는 영향을 주지 않습니다.") }
+        } message: { _ in Text("Keychain에 저장한 이 계정의 인증 정보가 삭제됩니다. 현재 로그인에는 영향을 주지 않습니다.") }
+    }
+
+    private func start() async {
+        model.loadPresets()
+        await model.request()
+        await updates.refresh()
+        await model.refreshUsage()
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Text("AD").font(.system(size: 15, weight: .black, design: .rounded)).foregroundStyle(ink)
-                    .frame(width: 36, height: 36).background(DockTheme.orange, in: RoundedRectangle(cornerRadius: 10))
+                DockIcon(size: 42)
                 Text("Account Dock").font(.system(size: 16, weight: .semibold))
             }.padding(.top, 40).padding(.bottom, 42)
             Text("CONTROL PANEL").font(.system(size: 9, weight: .semibold)).tracking(2).foregroundStyle(DockTheme.blue.opacity(0.75)).padding(.bottom, 14)
             nav("계정 관리", icon: "square.grid.2x2", id: "accounts")
-            nav("저장한 프리셋", icon: "person.crop.rectangle.stack", id: "presets")
+            nav("저장한 계정", icon: "person.crop.rectangle.stack", id: "presets")
             nav("버전 · 업데이트", icon: "arrow.down.circle", id: "updates")
+            nav("접근 및 개인정보", icon: "lock.shield", id: "access")
             Spacer()
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 6) { Circle().fill(accent).frame(width: 5, height: 5); Text("ON THIS MAC").tracking(1.5) }
@@ -222,14 +278,14 @@ struct Dashboard: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 9) {
                 Text("ACCOUNT DOCK  /  CONTROL SERIES").font(.system(size: 9, weight: .medium)).tracking(2.5).foregroundStyle(muted)
-                Text(selection == "accounts" ? "내 계정, 한눈에." : selection == "updates" ? "버전과 업데이트." : "다음에도, 이 계정으로.")
+                Text(selection == "accounts" ? "내 계정, 한눈에." : selection == "updates" ? "버전과 업데이트." : selection == "access" ? "필요한 접근만." : "다음에도, 이 계정으로.")
                     .font(.system(size: 29, weight: .semibold))
-                Text(selection == "accounts" ? "연결 상태를 확인하고 저장한 계정으로 전환하세요." : selection == "updates" ? "설치부터 다음 업데이트까지, 한곳에서." : "이 Mac에 저장한 계정을 관리하세요.")
+                Text(selection == "accounts" ? "연결 상태를 확인하고 저장한 계정으로 전환하세요." : selection == "updates" ? "설치부터 다음 업데이트까지, 한곳에서." : selection == "access" ? "계정 정보가 어디에 쓰이는지 확인하세요." : "이 Mac에 저장한 계정을 관리하세요.")
                     .font(.system(size: 12)).foregroundStyle(muted)
             }
             Spacer()
             DockStripes().frame(height: 62).padding(.trailing, 12)
-            Button { Task { await model.request(); await updates.refresh() } } label: {
+            Button { Task { await model.request(); await updates.refresh(); await model.refreshUsage() } } label: {
                 Label(model.busy ? "확인 중" : "새로고침", systemImage: "arrow.clockwise")
                     .font(.system(size: 11, weight: .medium)).padding(.horizontal, 4).padding(.vertical, 3)
             }.buttonStyle(DockButtonStyle()).disabled(model.busy)
@@ -295,9 +351,11 @@ struct Dashboard: View {
     private var presetSection: some View {
         VStack(alignment: .leading, spacing: 13) {
             HStack {
-                sectionTitle("계정 프리셋", detail: "Keychain에 안전하게 보관")
+                sectionTitle("저장한 계정", detail: "현재 로그인은 자동 등록 · Codex 사용량 기준")
                 Spacer()
-                Button { presetName = ""; showSave = true } label: { Label("현재 계정 저장", systemImage: "plus") }
+                Button { Task { await model.refreshUsage() } } label: { Label(model.refreshingUsage ? "조회 중…" : "사용량 확인", systemImage: "chart.bar") }
+                    .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.refreshingUsage || model.presets.isEmpty)
+                Button { presetName = ""; showSave = true } label: { Label("계정 이름 지정", systemImage: "pencil") }
                     .font(.system(size: 11)).buttonStyle(DockButtonStyle(kind: .quiet))
                     .disabled(!model.connected || !model.supportsPresets || model.busy)
             }
@@ -314,18 +372,25 @@ struct Dashboard: View {
                     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(ink.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
             } else {
                 ForEach(model.presets) { preset in
+                    VStack(alignment: .leading, spacing: 16) {
                     HStack(spacing: 13) {
                         Image(systemName: "person.crop.circle.fill").font(.system(size: 28)).foregroundStyle(accent.opacity(0.7))
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(preset.name).font(.system(size: 13, weight: .medium))
+                            HStack(spacing: 8) {
+                                Text(preset.name).font(.system(size: 13, weight: .medium))
+                                if model.activeAccountID == preset.id { Text("현재 로그인").font(.system(size: 9, weight: .semibold)).padding(.horizontal, 7).padding(.vertical, 4).background(DockTheme.blue.opacity(0.5), in: Capsule()) }
+                            }
                             Text(preset.email).font(.system(size: 11)).foregroundStyle(muted)
                         }
                         Spacer()
                         Text(preset.savedAt, style: .date).font(.system(size: 10)).foregroundStyle(muted)
-                        Button("선택") { pendingPreset = preset; showSwitch = true }.buttonStyle(DockButtonStyle()).disabled(model.busy)
-                        Button { pendingDelete = preset; showDelete = true } label: { Image(systemName: "trash").accessibilityLabel("프리셋 삭제") }
-                            .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.busy)
-                    }.padding(16).background(.white, in: RoundedRectangle(cornerRadius: 12))
+                        Button("선택") { pendingPreset = preset; showSwitch = true }.buttonStyle(DockButtonStyle()).disabled(model.busy || model.activeAccountID == preset.id)
+                        Button { pendingDelete = preset; showDelete = true } label: { Image(systemName: "trash").accessibilityLabel("저장한 계정 삭제") }
+                            .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.busy || model.activeAccountID == preset.id)
+                    }
+                    Divider().opacity(0.5)
+                    AccountUsageView(report: model.usage[preset.id], loading: model.usageLoading.contains(preset.id))
+                    }.padding(18).background(.white, in: RoundedRectangle(cornerRadius: 12))
                 }
             }
         }
@@ -353,8 +418,8 @@ struct Dashboard: View {
     }
     private var saveSheet: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("계정 프리셋 저장").font(.title2.weight(.semibold))
-            Text("현재 계정의 인증 정보를 이 Mac의 Keychain에 저장합니다. 만료되거나 취소된 인증은 다시 로그인해야 합니다.")
+            Text("계정 이름 지정").font(.title2.weight(.semibold))
+            Text("개인용, 업무용처럼 알아보기 쉬운 이름을 정하세요. 같은 계정은 중복 등록하지 않습니다.")
                 .font(.system(size: 12)).foregroundStyle(muted)
             TextField("예: 개인용, 업무용", text: $presetName).textFieldStyle(.plain).padding(13).background(.white, in: RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(ink.opacity(0.15)))

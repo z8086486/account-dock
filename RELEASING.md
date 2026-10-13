@@ -6,7 +6,7 @@
 
 `Sources/AccountDock/Resources/release.json`을 버전 정보의 원본으로 사용합니다.
 
-- `version`: Account Dock의 SemVer 버전. 현재 `0.3.0`.
+- `version`: Account Dock의 SemVer 버전. 현재 `0.4.0`.
 - `build`: 배포 후보마다 증가하는 정수. Sparkle의 업데이트 비교에 사용하는 `CFBundleVersion`으로 전달됩니다. 같은 빌드 번호를 재사용하지 않습니다.
 - `channel`: 현재 `preview`. 공개 안정판은 출시 검증 후 변경합니다.
 - `minimumMacOS`: 지원 macOS 하한.
@@ -16,7 +16,7 @@ ChatGPT와 Codex는 자체 버전 체계를 유지합니다. 설치 버전이 �
 
 연동 대상이 업데이트되면 다음 순서로 대응합니다.
 
-1. 기존 버전과 새 버전에서 조회, 로그인, 로그아웃, 취소 및 프리셋 복원을 검증합니다.
+1. 기존 버전과 새 버전에서 조회, 로그인, 로그아웃, 취소 및 저장한 계정 복원을 검증합니다.
 2. API·인증 저장소 변경이 있으면 해당 연동 코드를 수정합니다.
 3. 실제로 통과한 기능 범위만 `compatibility`에 기록하고 테스트를 보강합니다.
 4. Account Dock 버전과 빌드 번호를 올리고 새 릴리즈를 준비합니다.
@@ -38,7 +38,7 @@ python3 scripts/package_app.py --dmg
 - `AccountDock-<version>-<architecture>-preview.dmg`
 - `SHA256SUMS`
 
-앱에는 Sparkle 프레임워크, 설정 리소스와 진단 스크립트만 포함합니다. 사용자 계정, 인증 파일, 프리셋, 작업 기록은 포함하지 않습니다. 빌드한 Mac의 아키텍처용으로 생성하며 현재 universal 배포가 아닙니다.
+앱에는 Sparkle 프레임워크, 설정 리소스와 진단 스크립트만 포함합니다. 사용자 계정, 인증 파일, 저장한 계정, 작업 기록은 포함하지 않습니다. 빌드한 Mac의 아키텍처용으로 생성하며 현재 universal 배포가 아닙니다.
 
 프리뷰는 로컬 실행을 위한 ad-hoc 서명입니다. Developer ID 서명·공증을 받은 정식 배포본이 아니며, 앱 자체 업데이트도 비활성화됩니다. **현재는 실행 대상 Mac에도 Python 3와 공식 Codex 확장이 필요합니다.** Python 의존성 제거 또는 런타임 배포 전략을 해결하기 전에는 일반 사용자용 독립 실행 앱으로 홍보하지 않습니다.
 
@@ -81,7 +81,7 @@ https://github.com/z8086486/account-dock/releases/latest/download/appcast.xml
 1. 서명·공증된 산출물만 별도 업데이트 폴더에 복사합니다.
 2. Sparkle `generate_appcast`로 아카이브의 Ed25519 서명과 `appcast.xml`을 생성합니다. 다운로드 URL은 해당 `v<version>` 태그의 고정된 GitHub Release asset URL을 사용합니다.
 3. GitHub에 **Draft Release**를 만들고 서명된 ZIP/DMG, `SHA256SUMS`, `appcast.xml`을 첨부합니다. 앱 바이너리를 Git 소스 이력에 커밋하지 않습니다.
-4. 이전 버전 → 새 버전의 다운로드, 서명 검증, 설치, 재실행, Keychain 프리셋 유지 및 실패 복구를 검증합니다.
+4. 이전 버전 → 새 버전의 다운로드, 서명 검증, 설치, 재실행, Keychain 저장한 계정 유지 및 실패 복구를 검증합니다.
 5. 확인이 끝난 뒤 안정 릴리즈로 공개합니다. `releases/latest`는 안정 릴리즈 경로이므로 prerelease와 혼용하지 않습니다. 프리뷰 자동 배포가 필요해지면 별도 피드를 만듭니다.
 
 현재 자동 다운로드·자동 설치는 기본으로 켜지 않습니다. 사용자가 앱 안에서 업데이트를 확인하고 설치하는 흐름부터 제공합니다. Sparkle가 다운로드 및 서명 검증·앱 교체를 담당합니다. 최초 서명 배포본과 후속 배포본 사이의 실제 업데이트는 아직 검증하지 않았습니다.
@@ -92,7 +92,7 @@ https://github.com/z8086486/account-dock/releases/latest/download/appcast.xml
 - ChatGPT: 설치된 앱의 버전을 표시하고 현재 앱 번들에서 확인한 공식 업데이트 피드를 조회합니다. 접근 제한이나 응답 형식 변경은 ‘확인할 수 없음’으로 표시합니다. 설치는 공식 ChatGPT 앱의 업데이트 기능 또는 공식 다운로드 경로에서 진행합니다. Account Dock이 ChatGPT 앱 번들을 교체하지 않습니다.
 - Account Dock: GitHub Releases의 최신 안정판을 조회합니다. 첫 릴리즈 전의 404는 ‘첫 릴리즈 준비 중’으로 표시합니다.
 
-온라인 조회에는 계정 이메일·토큰을 전송하지 않습니다. 버전 확인을 위한 GitHub, OpenAI 업데이트 서버, VS Code Marketplace 요청만 사용합니다.
+버전 조회에는 계정 이메일·토큰을 전송하지 않습니다. 계정별 사용량 조회는 별개로 OpenAI 인증을 사용합니다. 버전 확인을 위한 GitHub, OpenAI 업데이트 서버, VS Code Marketplace 요청만 사용합니다.
 
 ## 참고
 
