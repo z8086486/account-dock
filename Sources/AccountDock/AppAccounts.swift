@@ -128,16 +128,13 @@ struct AppAccountCard: View {
     let busy: Bool
     let canSwitch: Bool
     let switchExplanation: String
-    let onSwitch: (AccountPreset) -> Void
     let onAdd: () -> Void
-    var onConnectEnvironment: (() -> Void)? = nil
     var onOpenDedicated: ((AccountPreset) -> Void)? = nil
-    @State private var dedicatedMode = false
     @State private var selectedID: String?
     private var displayedAccounts: [AppIdentity] { AppAccountPresentation.grouped(accounts) }
     private var choices: [AccountPreset] {
         let targets = onOpenDedicated == nil ? accounts : accounts.filter {
-            dedicatedMode ? $0.home == VSCodeIsolation.home.path : $0.home != VSCodeIsolation.home.path
+            $0.home == VSCodeIsolation.home.path
         }
         return AppAccountPresentation.choices(presets, accounts: targets)
     }
@@ -192,65 +189,48 @@ struct AppAccountCard: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 if account.id != displayedAccounts.last?.id { Divider().opacity(0.4) }
             }
-            if let onConnectEnvironment {
-                Button("테마·대화 연결 후 열기", action: onConnectEnvironment)
-                    .buttonStyle(DockButtonStyle()).disabled(busy)
-            }
             if canSwitch {
-            Divider().opacity(0.4)
-            HStack {
-                Text("바꿀 계정 선택").font(.system(size: 12, weight: .semibold))
-                Spacer()
-                Button(action: onAdd) { Label("추가", systemImage: "plus") }
-                    .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(busy)
-            }
-            if choices.isEmpty {
-                Text(presets.isEmpty ? "계정을 추가하면 여기에서 선택할 수 있습니다." : "저장한 계정이 모두 연결되어 있습니다.").font(.system(size: 11)).foregroundStyle(DockTheme.muted)
-            }
-            ForEach(choices) { preset in
-                Button { selectedID = preset.id } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: selectedID == preset.id ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(selectedID == preset.id ? DockTheme.orange : DockTheme.muted)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(preset.name).font(.system(size: 12, weight: .medium))
-                            Text(preset.email).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
-                                .lineLimit(1).truncationMode(.middle)
-                        }
-                        Spacer(minLength: 0)
-                    }.padding(11).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(selectedID == preset.id ? DockTheme.blue.opacity(0.22) : DockTheme.canvas, in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(selectedID == preset.id ? DockTheme.orange.opacity(0.5) : Color.clear))
-                        .contentShape(Rectangle())
-                }.buttonStyle(.plain).disabled(busy)
-                    .accessibilityLabel("\(title), \(preset.name), \(preset.email)")
-                    .accessibilityAddTraits(selectedID == preset.id ? [.isSelected] : [])
-            }
-            if onOpenDedicated != nil {
-                HStack(spacing: 8) {
-                    modeButton("현재 계정 전환", dedicated: false)
-                    modeButton("독립 전용 창", dedicated: true)
+                Divider().opacity(0.4)
+                HStack {
+                    Text("전용 창에서 사용할 계정").font(.system(size: 12, weight: .semibold))
+                    Spacer()
+                    Button(action: onAdd) { Label("추가", systemImage: "plus") }
+                        .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(busy)
                 }
-            }
-            Text(switchExplanation).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            Button(dedicatedMode ? "선택한 계정으로 전용 창 열기" : "선택한 계정으로 전환") {
-                if let selected {
-                    if dedicatedMode, let onOpenDedicated { onOpenDedicated(selected) } else { onSwitch(selected) }
+                if choices.isEmpty {
+                    Text(presets.isEmpty ? "계정을 추가하면 여기에서 선택할 수 있습니다." : "저장한 계정이 모두 연결되어 있습니다.").font(.system(size: 11)).foregroundStyle(DockTheme.muted)
                 }
-            }.buttonStyle(DockButtonStyle(kind: .primary))
-                .disabled(busy || !canSwitch || selected == nil)
+                ForEach(choices) { preset in
+                    Button { selectedID = preset.id } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: selectedID == preset.id ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selectedID == preset.id ? DockTheme.orange : DockTheme.muted)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(preset.name).font(.system(size: 12, weight: .medium))
+                                Text(preset.email).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                                    .lineLimit(1).truncationMode(.middle)
+                            }
+                            Spacer(minLength: 0)
+                        }.padding(11).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(selectedID == preset.id ? DockTheme.blue.opacity(0.22) : DockTheme.canvas, in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selectedID == preset.id ? DockTheme.orange.opacity(0.5) : Color.clear))
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(busy)
+                        .accessibilityLabel("\(title), \(preset.name), \(preset.email)")
+                        .accessibilityAddTraits(selectedID == preset.id ? [.isSelected] : [])
+                }
+                Text(switchExplanation).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("선택한 계정으로 전용 창 열기") {
+                    if let selected {
+                        onOpenDedicated?(selected)
+                    }
+                }.buttonStyle(DockButtonStyle(kind: .primary))
+                    .disabled(busy || !canSwitch || selected == nil)
             }
             Spacer(minLength: 0)
         }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(.white, in: RoundedRectangle(cornerRadius: 16))
-    }
-    private func modeButton(_ title: String, dedicated: Bool) -> some View {
-        Button { dedicatedMode = dedicated } label: {
-            Text(title).font(.system(size: 11, weight: .medium)).frame(maxWidth: .infinity).padding(10)
-                .background(dedicatedMode == dedicated ? DockTheme.blue : DockTheme.canvas, in: RoundedRectangle(cornerRadius: 9))
-        }.buttonStyle(.plain).disabled(busy)
-            .accessibilityAddTraits(dedicatedMode == dedicated ? [.isSelected] : [])
     }
 
 }

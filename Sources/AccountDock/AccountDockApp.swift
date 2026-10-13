@@ -192,23 +192,6 @@ final class DockModel: ObservableObject {
             message = "계정을 적용했습니다. 앱을 다시 열어 로그인 계정을 확인해 주세요."
         } catch { message = error.localizedDescription }
     }
-    func connectVSCodeEnvironment() async {
-        guard !busy, !refreshingUsage else { return }
-        busy = true
-        defer { busy = false }
-        do {
-            try VSCodeIsolation.requireStopped()
-            guard try AuthTransaction.snapshot(VSCodeIsolation.home.appendingPathComponent("auth.json")) != nil else {
-                throw DockError.message("먼저 전용 VS Code에서 사용할 계정을 선택해 주세요.")
-            }
-            try VSCodeIsolation.prepare()
-            try VSCodeEnvironment.prepare()
-            try VSCodeIsolation.requireStopped()
-            try await VSCodeIsolation.launch()
-            appAccounts = (try? await AppIdentityReader.read().accounts) ?? appAccounts
-            message = "기존 테마와 로컬 대화 기록을 연결해 전용 창을 열었습니다. 인증 계정은 유지됩니다. 같은 대화에서 동시에 작업하지 마세요."
-        } catch { message = error.localizedDescription }
-    }
     func applyToVSCode(_ preset: AccountPreset) async {
         guard !busy, !refreshingUsage else { return }
         busy = true
@@ -508,15 +491,13 @@ struct Dashboard: View {
                     accounts: model.appAccounts.filter { $0.product == "chatgpt" },
                     presets: model.presets, busy: model.busy || model.refreshingUsage, canSwitch: false,
                     switchExplanation: "앱 로그인 직접 조회·전환은 아직 연결되지 않았습니다. 아래 정보는 내부 Codex 저장소이며 앱 로그인 계정을 대신하지 않습니다. 공유 인증 변경은 저장한 계정의 고급 관리에서 가능합니다.",
-                    onSwitch: { _ in }, onAdd: { newAccountName = ""; showAdd = true })
+                    onAdd: { newAccountName = ""; showAdd = true })
                 AppAccountCard(title: "VS Code · Codex", icon: "chevron.left.forwardslash.chevron.right",
                     installed: updates.products.first { $0.id == "codex" }?.installed,
                     accounts: model.appAccounts.filter { $0.product == "codex" },
                     presets: model.presets, busy: model.busy || model.refreshingUsage, canSwitch: true,
-                    switchExplanation: "현재 계정 전환은 기존 VS Code의 공유 인증을 바꿉니다. 독립 전용 창은 기존 계정을 유지하고 테마·로컬 대화 기록을 연결합니다.",
-                    onSwitch: { preset in pendingPreset = preset; switchTarget = "기존 VS Code 공유 인증"; showSwitch = true },
+                    switchExplanation: "기존 VS Code와 별도의 계정으로 전용 창을 엽니다. 테마·로컬 대화 기록은 자동으로 연결합니다. 다른 계정으로 열기 전에는 전용 창을 종료해 주세요.",
                     onAdd: { newAccountName = ""; showAdd = true },
-                    onConnectEnvironment: { Task { await model.connectVSCodeEnvironment() } },
                     onOpenDedicated: { preset in pendingPreset = preset; showVSCode = true })
             }.fixedSize(horizontal: false, vertical: true)
             Text("저장소의 계정 정보입니다. 실행 중 세션은 아직 직접 확인하지 못하므로, 실제 앱에 표시된 계정과 다를 수 있습니다.")
