@@ -322,8 +322,10 @@ struct Dashboard: View {
                     }
                     if selection == "accounts" {
                         targets
-                        overview
-                    } else if selection == "updates" { UpdatePanel(center: updates) } else if selection == "access" { SetupPanel() } else { presetSection }
+                    } else if selection == "updates" { UpdatePanel(center: updates) } else if selection == "access" { SetupPanel() } else {
+                        presetSection
+                        DisclosureGroup("공유 인증 관리 · 고급") { overview.padding(.top, 12) }
+                    }
                     footer
                 }.padding(32)
             }.background(DockTheme.canvas)
@@ -444,6 +446,12 @@ struct Dashboard: View {
                 }
             }
             Divider().opacity(0.5)
+            Menu("공유 계정 전환") {
+                ForEach(model.presets) { preset in
+                    Button(preset.name) { pendingPreset = preset; showSwitch = true }
+                        .disabled(model.activeAccountID == preset.id)
+                }
+            }.disabled(model.busy || model.refreshingUsage || model.presets.isEmpty)
             HStack {
                 Text("계정 추가는 별도로 로그인하며, 로그아웃은 공유 저장소에 적용됩니다.")
                     .font(.system(size: 11)).foregroundStyle(muted)
@@ -459,14 +467,21 @@ struct Dashboard: View {
     }
     private var targets: some View {
         VStack(alignment: .leading, spacing: 13) {
-            sectionTitle("앱별 계정", detail: "실행 중인 앱의 인증 저장소를 각각 확인합니다")
+            sectionTitle("앱별 계정", detail: "현재 연결 계정을 확인하고, 앱별로 사용할 계정을 선택하세요")
             HStack(alignment: .top, spacing: 13) {
                 AppAccountCard(title: "ChatGPT", icon: "bubble.left.and.bubble.right",
                     installed: updates.products.first { $0.id == "chatgpt" }?.installed,
-                    accounts: model.appAccounts.filter { $0.product == "chatgpt" })
+                    accounts: model.appAccounts.filter { $0.product == "chatgpt" },
+                    presets: model.presets, busy: model.busy || model.refreshingUsage, canSwitch: false,
+                    switchExplanation: "ChatGPT 앱만 바꾸는 독립 전환은 아직 지원하지 않습니다. 표시된 정보는 앱의 Codex 인증 저장소 기준입니다.",
+                    onSwitch: { _ in }, onAdd: { newAccountName = ""; showAdd = true })
                 AppAccountCard(title: "VS Code · Codex", icon: "chevron.left.forwardslash.chevron.right",
                     installed: updates.products.first { $0.id == "codex" }?.installed,
-                    accounts: model.appAccounts.filter { $0.product == "codex" })
+                    accounts: model.appAccounts.filter { $0.product == "codex" },
+                    presets: model.presets, busy: model.busy || model.refreshingUsage, canSwitch: true,
+                    switchExplanation: "현재는 전용 창만 전환합니다. 기존 창의 테마·기록을 유지하는 전환은 준비 중입니다. 전용 VS Code를 종료한 뒤 선택해 주세요.",
+                    onSwitch: { preset in pendingPreset = preset; showVSCode = true },
+                    onAdd: { newAccountName = ""; showAdd = true })
             }.fixedSize(horizontal: false, vertical: true)
             Text("저장소의 계정 정보입니다. 실행 중 세션은 아직 직접 확인하지 못하므로, 실제 앱에 표시된 계정과 다를 수 있습니다.")
                 .font(.system(size: 11)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
@@ -509,8 +524,6 @@ struct Dashboard: View {
                         }
                         Spacer()
                         Text(preset.savedAt, style: .date).font(.system(size: 10)).foregroundStyle(muted)
-                        Button("공유 계정 전환") { pendingPreset = preset; showSwitch = true }.buttonStyle(DockButtonStyle()).disabled(model.busy || model.activeAccountID == preset.id)
-                        Button("VS Code에 적용") { pendingPreset = preset; showVSCode = true }.buttonStyle(DockButtonStyle(kind: .primary)).disabled(model.busy || model.refreshingUsage)
                         Button { pendingDelete = preset; showDelete = true } label: { Image(systemName: "trash").accessibilityLabel("저장한 계정 삭제") }
                             .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.busy || model.activeAccountID == preset.id)
                     }

@@ -18,7 +18,7 @@ ChatGPT 앱에는 개인 계정, VS Code 확장에는 업무 계정을 사용하
 - 저장한 계정 적용 전 현재 계정 자동 백업 및 실행 중인 앱 변경 차단
 - 하늘색·오렌지·짙은 남색의 전용 UI, 커스텀 버튼과 독자 제작 앱 아이콘
 - Account Dock, ChatGPT, Codex의 설치 버전·최신 버전·검증 범위 표시
-- **VS Code에 적용:** 전용 인증 폴더와 별도 VS Code 인스턴스로 계정 연결
+- **계정 관리:** 앱별 현재 연결 계정과 저장 계정 선택. VS Code 전용 창 전환은 실험 기능
 - 공식 CLI를 이용한 Codex 확장 업데이트
 - 명령줄에서 앱 설치 여부 및 Codex 인증 상태 확인
 - 지정한 `CODEX_HOME`의 인증 상태 조회
@@ -94,7 +94,9 @@ python3 scripts/doctor.py --binary /absolute/path/to/codex
 
 ## VS Code만 다른 계정 사용하기
 
-저장한 계정에서 **VS Code에 적용 → 적용하고 열기**를 선택하세요. `Account Dock` 제목의 별도 VS Code 창이 열립니다. ChatGPT와 기존 VS Code 계정은 유지합니다. 기존 설정·MCP·대화 기록은 자동 복사하지 않습니다. 다음 전환 전에는 전용 VS Code를 종료해야 합니다. 자세한 동작과 한계는 [VS Code 분리 안내](ISOLATION.md)를 확인하세요.
+**계정 관리 → VS Code · Codex**에서 저장한 계정을 선택하고 **선택한 계정으로 전환 → 적용하고 열기**를 선택하세요. `Account Dock` 제목의 별도 VS Code 창이 열립니다. ChatGPT와 기존 VS Code 계정은 유지합니다. 기존 설정·MCP·대화 기록은 자동 복사하지 않습니다. 다음 전환 전에는 전용 VS Code를 종료해야 합니다. 자세한 동작과 한계는 [VS Code 분리 안내](ISOLATION.md)를 확인하세요.
+
+현재 ChatGPT 앱만의 독립 전환은 지원하지 않으며 해당 카드에서 비활성 상태로 표시합니다. 공유 저장소 변경은 **저장한 계정 → 공유 인증 관리 · 고급**에 별도로 둡니다.
 
 ## 앱별 계정 조회 범위
 

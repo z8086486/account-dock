@@ -124,6 +124,14 @@ struct AppAccountCard: View {
     let icon: String
     let installed: String?
     let accounts: [AppIdentity]
+    let presets: [AccountPreset]
+    let busy: Bool
+    let canSwitch: Bool
+    let switchExplanation: String
+    let onSwitch: (AccountPreset) -> Void
+    let onAdd: () -> Void
+    @State private var selectedID: String?
+    private var selected: AccountPreset? { presets.first { $0.id == selectedID } }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
@@ -139,32 +147,69 @@ struct AppAccountCard: View {
             if accounts.isEmpty {
                 Text("계정 확인 전").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
             }
+            Text("현재 연결 계정").font(.system(size: 11, weight: .semibold)).foregroundStyle(DockTheme.muted)
             ForEach(accounts) { account in
                 VStack(alignment: .leading, spacing: 6) {
+                    if account.product == "codex" {
+                        Text(account.home == VSCodeIsolation.home.path ? "전용 VS Code · 실험 기능" : "기존 VS Code")
+                            .font(.system(size: 10, weight: .semibold)).foregroundStyle(DockTheme.muted)
+                    }
                     if let email = account.email {
                         Text(email).font(.system(size: 13, weight: .medium)).textSelection(.enabled)
                         Text([account.plan?.uppercased(), account.statusLabel].compactMap { $0 }.joined(separator: " · "))
                             .font(.system(size: 10)).foregroundStyle(DockTheme.muted)
                     } else { Text(account.statusLabel).font(.system(size: 12)).foregroundStyle(DockTheme.muted) }
-                    if let version = account.version {
-                        Text("실행 중 확장 · \(version)").font(.system(size: 10))
-                            .foregroundStyle(version == installed ? DockTheme.muted : DockTheme.orange)
-                    }
-                    if let version = account.version, let installed, version != installed {
-                        Text("설치 버전과 다름 · VS Code 재시작 후 확인")
-                            .font(.system(size: 10)).foregroundStyle(DockTheme.muted)
-                    }
-                    if account.home == VSCodeIsolation.home.path {
-                        Text("Account Dock 전용 VS Code").font(.system(size: 10, weight: .semibold)).foregroundStyle(DockTheme.orange)
-                    }
-                    if let home = account.home {
-                        Text(home.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
-                            .font(.system(size: 10, design: .monospaced)).foregroundStyle(DockTheme.muted)
-                            .lineLimit(2).help(home)
-                    }
+                    DisclosureGroup("연결 정보") {
+                        VStack(alignment: .leading, spacing: 5) {
+                            if let version = account.version {
+                                Text("실행 중 확장 · \(version)")
+                                if let installed, version != installed { Text("설치 버전과 다름 · VS Code 재시작 후 확인").foregroundStyle(DockTheme.orange) }
+                            }
+                            if let home = account.home {
+                                Text(home.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
+                                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }.font(.system(size: 10)).foregroundStyle(DockTheme.muted).padding(.top, 5)
+                    }.font(.system(size: 10)).foregroundStyle(DockTheme.muted)
+
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 if account.id != accounts.last?.id { Divider().opacity(0.4) }
             }
+            Divider().opacity(0.4)
+            HStack {
+                Text("바꿀 계정 선택").font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button(action: onAdd) { Label("추가", systemImage: "plus") }
+                    .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(busy)
+            }
+            if presets.isEmpty {
+                Text("계정을 추가하면 여기에서 선택할 수 있습니다.").font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+            }
+            ForEach(presets) { preset in
+                Button { selectedID = preset.id } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: selectedID == preset.id ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(selectedID == preset.id ? DockTheme.orange : DockTheme.muted)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(preset.name).font(.system(size: 12, weight: .medium))
+                            Text(preset.email).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                                .lineLimit(1).truncationMode(.middle)
+                        }
+                        Spacer(minLength: 0)
+                    }.padding(11).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(selectedID == preset.id ? DockTheme.blue.opacity(0.22) : DockTheme.canvas, in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(selectedID == preset.id ? DockTheme.orange.opacity(0.5) : Color.clear))
+                        .contentShape(Rectangle())
+                }.buttonStyle(.plain).disabled(busy)
+                    .accessibilityLabel("\(title), \(preset.name), \(preset.email)")
+                    .accessibilityAddTraits(selectedID == preset.id ? [.isSelected] : [])
+            }
+            Text(switchExplanation).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(canSwitch ? "선택한 계정으로 전환" : "독립 전환 준비 중") {
+                if let selected { onSwitch(selected) }
+            }.buttonStyle(DockButtonStyle(kind: .primary))
+                .disabled(busy || !canSwitch || selected == nil)
             Spacer(minLength: 0)
         }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(.white, in: RoundedRectangle(cornerRadius: 16))
