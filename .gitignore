@@ -10,7 +10,7 @@
 /Sources/*
 !/Sources/AccountDock/
 /Sources/AccountDock/*
-!/Sources/AccountDock/main.swift
+!/Sources/AccountDock/AccountDockApp.swift
 !/Sources/AccountDock/AccountStore.swift
 
 /scripts/*

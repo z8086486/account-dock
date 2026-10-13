@@ -152,15 +152,21 @@ python3 -m unittest discover -s tests -v
 
 ```text
 Package.swift                   Swift 패키지 설정
-Sources/AccountDock/main.swift  macOS 관리 창 및 동작 연결
+Sources/AccountDock/AccountDockApp.swift  macOS 관리 창 및 동작 연결
 Sources/AccountDock/AccountStore.swift  Keychain 계정 저장·복원
 Sources/AccountDock/Setup.swift 첫 실행 접근 설정
-Sources/AccountDock/Usage.swift 계정별 한도 화면
-scripts/usage.py                격리된 메모리 인증으로 사용량 조회
+Sources/AccountDock/CodexService.swift  공식 app-server Swift 연결
+Sources/AccountDock/SwitchSafety.swift  실행 중 보호 및 인증 파일 전환
+Sources/AccountDock/AppAccounts.swift   앱별 인증 저장소 조회
+Sources/AccountDock/Usage.swift 계정별 한도·크레딧 조회 및 화면
+Sources/AccountDock/VersionService.swift 버전 조회·확장 업데이트
+scripts/usage.py                개발용 사용량 진단
+scripts/install_local.py        최신 앱 단일 로컬 설치
+scripts/release_preflight.py    서명·공증 준비 상태 확인
 scripts/generate_icon.swift     원본 아이콘 생성
 scripts/doctor.py               Codex 계정 진단
 tests/test_doctor.py            인증 프로토콜·계정 응답 테스트
-tests/AccountDockTests/         인증 파일 복원·Keychain 테스트
+tests/AccountDockTests/         프로토콜·충돌·만료·Keychain 테스트
 ```
 
 `.gitignore`는 공개할 소스·테스트·설정·README 파일만 허용합니다. 새 파일을 추가할 때는 공개 대상인지 확인하고 허용 목록을 갱신해 주세요. 로컬 작업 기록, 인증 정보, 로그, 빌드 결과물은 저장소에 포함하지 않습니다.
@@ -172,7 +178,7 @@ tests/AccountDockTests/         인증 파일 복원·Keychain 테스트
 - OpenAI 앱·확장의 실제 계정 상태와 인증 공유 범위 검증
 - 앱별 독립 로그인·로그아웃과 계정 전환 검증
 - 서비스별 연동 모듈을 분리해 Anthropic Claude 등 추가
-- 진단 기능의 Swift 이전, 메뉴 막대 지원, 서명·공증된 정식 배포
+- 메뉴 막대 지원, 깨끗한 Mac 설치 및 서명·공증된 정식 배포
 - 이전 배포본에서 새 배포본으로의 실제 자체 업데이트 검증
 
 현재는 OpenAI 연동을 검증하는 단계입니다. Claude 및 기타 서비스 지원 일정은 아직 정하지 않았습니다.
