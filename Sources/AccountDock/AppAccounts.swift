@@ -131,9 +131,16 @@ struct AppAccountCard: View {
     let onSwitch: (AccountPreset) -> Void
     let onAdd: () -> Void
     var onConnectEnvironment: (() -> Void)? = nil
+    var onOpenDedicated: ((AccountPreset) -> Void)? = nil
+    @State private var dedicatedMode = false
     @State private var selectedID: String?
     private var displayedAccounts: [AppIdentity] { AppAccountPresentation.grouped(accounts) }
-    private var choices: [AccountPreset] { AppAccountPresentation.choices(presets, accounts: accounts) }
+    private var choices: [AccountPreset] {
+        let targets = onOpenDedicated == nil ? accounts : accounts.filter {
+            dedicatedMode ? $0.home == VSCodeIsolation.home.path : $0.home != VSCodeIsolation.home.path
+        }
+        return AppAccountPresentation.choices(presets, accounts: targets)
+    }
     private var selected: AccountPreset? { choices.first { $0.id == selectedID } }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -211,16 +218,32 @@ struct AppAccountCard: View {
                     .accessibilityLabel("\(title), \(preset.name), \(preset.email)")
                     .accessibilityAddTraits(selectedID == preset.id ? [.isSelected] : [])
             }
+            if onOpenDedicated != nil {
+                HStack(spacing: 8) {
+                    modeButton("현재 계정 전환", dedicated: false)
+                    modeButton("독립 전용 창", dedicated: true)
+                }
+            }
             Text(switchExplanation).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(canSwitch ? "선택한 계정으로 전환" : "독립 전환 준비 중") {
-                if let selected { onSwitch(selected) }
+            Button(dedicatedMode ? "선택한 계정으로 전용 창 열기" : "선택한 계정으로 전환") {
+                if let selected {
+                    if dedicatedMode, let onOpenDedicated { onOpenDedicated(selected) } else { onSwitch(selected) }
+                }
             }.buttonStyle(DockButtonStyle(kind: .primary))
                 .disabled(busy || !canSwitch || selected == nil)
             Spacer(minLength: 0)
         }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(.white, in: RoundedRectangle(cornerRadius: 16))
     }
+    private func modeButton(_ title: String, dedicated: Bool) -> some View {
+        Button { dedicatedMode = dedicated } label: {
+            Text(title).font(.system(size: 11, weight: .medium)).frame(maxWidth: .infinity).padding(10)
+                .background(dedicatedMode == dedicated ? DockTheme.blue : DockTheme.canvas, in: RoundedRectangle(cornerRadius: 9))
+        }.buttonStyle(.plain).disabled(busy)
+            .accessibilityAddTraits(dedicatedMode == dedicated ? [.isSelected] : [])
+    }
+
 }
 
 /// Group connection rows by store and identity, retaining observed extension versions.

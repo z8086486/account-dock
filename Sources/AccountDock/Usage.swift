@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct UsageWindow: Decodable, Identifiable {
+struct UsageWindow: Decodable, Identifiable, Sendable {
     let id: String
     let bucket: String
     let usedPercent: Double
@@ -14,7 +14,7 @@ struct UsageWindow: Decodable, Identifiable {
         return "\(Int(minutes))분 한도 · \(bucket)"
     }
 }
-struct CreditBalance: Decodable, Identifiable {
+struct CreditBalance: Decodable, Identifiable, Sendable {
     let id: String
     let bucket: String
     let status: String
@@ -29,7 +29,7 @@ struct CreditBalance: Decodable, Identifiable {
         }
     }
 }
-struct UsageReport: Decodable {
+struct UsageReport: Decodable, Sendable {
     let status: String
     let windows: [UsageWindow]
     let activity: [String: Double]
@@ -179,6 +179,37 @@ struct AccountUsageView: View {
                 }
             } else {
                 Text("사용량을 아직 확인하지 않았습니다.").font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+            }
+        }
+    }
+}
+
+@MainActor
+enum UsageBatch {
+    static func read(_ accounts: [AccountPreset], limit: Int = 4,
+                     reader: @escaping @MainActor @Sendable (Data) async throws -> UsageReport = UsageReader.read,
+                     receive: @MainActor (String, UsageReport) -> Void) async {
+        await withTaskGroup(of: (String, UsageReport).self) { group in
+            var next = 0
+            let fetch: @Sendable (AccountPreset) async -> (String, UsageReport) = { account in
+                let report: UsageReport
+                do { report = try await reader(account.credential) }
+                catch { report = UsageReport(status: "unavailable", windows: [], activity: [:], checkedAt: nil) }
+                return (account.id, report)
+            }
+            while next < min(max(1, limit), accounts.count) {
+                let account = accounts[next]
+                group.addTask { await fetch(account) }
+                next += 1
+            }
+            while let (id, report) = await group.next() {
+                if Task.isCancelled { group.cancelAll(); break }
+                receive(id, report)
+                if next < accounts.count {
+                    let account = accounts[next]
+                    group.addTask { await fetch(account) }
+                    next += 1
+                }
             }
         }
     }

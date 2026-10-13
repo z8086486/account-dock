@@ -93,11 +93,12 @@ final class DockModel: ObservableObject {
         } catch { message = error.localizedDescription; return false }
     }
     func addAccount(name: String) async {
-        guard !busy else { return }
+        guard !busy, !refreshingUsage else { return }
         busy = true; addingAccount = true
         message = "브라우저에서 추가할 계정으로 로그인해 주세요. 현재 앱의 계정은 유지됩니다."
         defer { busy = false; addingAccount = false; canCancelLogin = false; connection = nil }
         var home: URL?
+        var added = false
         do {
             let isolated = try CodexService.temporaryHome(); home = isolated
             try Data("cli_auth_credentials_store = \"file\"\n".utf8).write(to: isolated.appendingPathComponent("config.toml"))
@@ -133,11 +134,14 @@ final class DockModel: ObservableObject {
                 email: email, plan: result.codex.plan, savedAt: Date(), credential: credential)
             try await AccountVault.shared.upsert(entry, preserveName: label.isEmpty)
             await loadPresets()
+            added = true
             message = "계정을 추가했습니다. 사용할 계정은 목록에서 선택하세요. 현재 로그인은 변경하지 않았습니다."
         } catch is CancellationError { message = "계정 추가를 취소했습니다. 현재 로그인은 유지됩니다." }
         catch { message = error.localizedDescription }
         await connection?.shutdown()
         if let home { try? FileManager.default.removeItem(at: home) }
+        connection = nil
+        if added { await refreshUsage(allowWhileAdding: true) }
     }
     func savePreset(name: String) async {
         guard !busy else { return }
@@ -278,22 +282,25 @@ final class DockModel: ObservableObject {
             await loadPresets()
         } catch { message = "현재 계정을 자동 등록하지 못했습니다. 접근 및 개인정보 화면에서 Keychain 접근을 확인해 주세요." }
     }
-    func refreshUsage() async {
-        guard !refreshingUsage, !busy else { return }
+    func refreshUsage(allowWhileAdding: Bool = false) async {
+        guard !refreshingUsage, (!busy || (allowWhileAdding && addingAccount)) else { return }
         guard UserDefaults.standard.object(forKey: "accountDock.usageEnabled") as? Bool ?? true else {
             usage = [:]
             return
         }
         refreshingUsage = true
-        defer { refreshingUsage = false }
-        for account in presets {
-            guard UserDefaults.standard.object(forKey: "accountDock.usageEnabled") as? Bool ?? true else { break }
-            usageLoading.insert(account.id)
-            do { usage[account.id] = try await UsageReader.read(account.credential) }
-            catch { usage[account.id] = UsageReport(status: "unavailable", windows: [], activity: [:], checkedAt: nil) }
-            usageLoading.remove(account.id)
+        let snapshot = presets
+        usageLoading = Set(snapshot.map(\.id))
+        defer { refreshingUsage = false; usageLoading.removeAll() }
+        await UsageBatch.read(snapshot) { id, report in
+            guard UserDefaults.standard.object(forKey: "accountDock.usageEnabled") as? Bool ?? true else {
+                usage = [:]; return
+            }
+            if presets.contains(where: { $0.id == id }) { usage[id] = report }
+            usageLoading.remove(id)
         }
     }
+
     func remove(_ preset: AccountPreset) async {
         guard !busy else { return }
         busy = true
@@ -317,6 +324,7 @@ struct Dashboard: View {
     @State private var pendingPreset: AccountPreset?
     @State private var showLogout = false
     @State private var showSwitch = false
+    @State private var switchTarget = "공유 인증"
     @State private var showDelete = false
     @State private var pendingDelete: AccountPreset?
     private let ink = DockTheme.navy
@@ -353,6 +361,14 @@ struct Dashboard: View {
         .task {
             if setupCompleted { await start() } else { showSetup = true }
         }
+        .task(id: selection) {
+            guard selection == "presets" else { return }
+            while model.busy {
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+            }
+            guard !Task.isCancelled else { return }
+            await model.refreshUsage()
+        }
         .sheet(isPresented: $showSetup) {
             SetupPanel(firstLaunch: true) {
                 setupCompleted = true; showSetup = false
@@ -383,10 +399,10 @@ struct Dashboard: View {
             Button("취소", role: .cancel) {}
             Button("로그아웃", role: .destructive) { Task { await model.request("logout") } }
         } message: { Text("같은 저장소를 사용하는 ChatGPT, VS Code, Codex CLI에 영향을 줄 수 있습니다. 저장한 계정은 유지됩니다.") }
-        .alert("이 계정으로 전환할까요?", isPresented: $showSwitch, presenting: pendingPreset) { preset in
+        .alert("\(switchTarget) 계정을 전환할까요?", isPresented: $showSwitch, presenting: pendingPreset) { preset in
             Button("취소", role: .cancel) {}
             Button("전환") { Task { await model.activate(preset) } }
-        } message: { _ in Text("현재 계정은 Keychain에 자동 백업합니다. 공유 저장소를 사용하는 앱에 함께 적용되며, 만료된 인증은 다시 로그인해야 합니다.") }
+        } message: { _ in Text("현재 계정은 자동 백업합니다. ChatGPT의 Codex 기능·기존 VS Code·CLI가 같은 인증을 사용하므로 함께 변경될 수 있습니다. 해당 앱과 작업 프로세스를 모두 종료한 뒤 전환하세요. 일반 ChatGPT 대화 로그인 세션 변경은 아직 지원하지 않습니다.") }
         .alert("저장한 계정을 삭제할까요?", isPresented: $showDelete, presenting: pendingDelete) { preset in
             Button("취소", role: .cancel) {}
             Button("삭제", role: .destructive) { Task { await model.remove(preset) } }
@@ -466,7 +482,7 @@ struct Dashboard: View {
             Divider().opacity(0.5)
             Menu("공유 계정 전환") {
                 ForEach(model.presets) { preset in
-                    Button(preset.name) { pendingPreset = preset; showSwitch = true }
+                    Button(preset.name) { pendingPreset = preset; switchTarget = "공유 인증"; showSwitch = true }
                         .disabled(model.activeAccountID == preset.id)
                 }
             }.disabled(model.busy || model.refreshingUsage || model.presets.isEmpty)
@@ -490,17 +506,18 @@ struct Dashboard: View {
                 AppAccountCard(title: "ChatGPT", icon: "bubble.left.and.bubble.right",
                     installed: updates.products.first { $0.id == "chatgpt" }?.installed,
                     accounts: model.appAccounts.filter { $0.product == "chatgpt" },
-                    presets: model.presets, busy: model.busy || model.refreshingUsage, canSwitch: false,
-                    switchExplanation: "ChatGPT 앱만 바꾸는 독립 전환은 아직 지원하지 않습니다. 표시된 정보는 앱의 Codex 인증 저장소 기준입니다.",
-                    onSwitch: { _ in }, onAdd: { newAccountName = ""; showAdd = true })
+                    presets: model.presets, busy: model.busy || model.refreshingUsage, canSwitch: true,
+                    switchExplanation: "ChatGPT의 Codex 인증을 전환합니다. 기존 VS Code·CLI와 공유되어 함께 변경될 수 있으며, 일반 ChatGPT 대화 로그인은 별도입니다.",
+                    onSwitch: { preset in pendingPreset = preset; switchTarget = "ChatGPT · Codex 공유 인증"; showSwitch = true }, onAdd: { newAccountName = ""; showAdd = true })
                 AppAccountCard(title: "VS Code · Codex", icon: "chevron.left.forwardslash.chevron.right",
                     installed: updates.products.first { $0.id == "codex" }?.installed,
                     accounts: model.appAccounts.filter { $0.product == "codex" },
                     presets: model.presets, busy: model.busy || model.refreshingUsage, canSwitch: true,
-                    switchExplanation: "전용 창에서 다른 계정을 사용합니다. 기존 테마와 로컬 대화 기록을 연결하며, 이미 연결된 계정은 목록에서 제외합니다.",
-                    onSwitch: { preset in pendingPreset = preset; showVSCode = true },
+                    switchExplanation: "현재 계정 전환은 기존 VS Code의 공유 인증을 바꿉니다. 독립 전용 창은 기존 계정을 유지하고 테마·로컬 대화 기록을 연결합니다.",
+                    onSwitch: { preset in pendingPreset = preset; switchTarget = "기존 VS Code 공유 인증"; showSwitch = true },
                     onAdd: { newAccountName = ""; showAdd = true },
-                    onConnectEnvironment: { Task { await model.connectVSCodeEnvironment() } })
+                    onConnectEnvironment: { Task { await model.connectVSCodeEnvironment() } },
+                    onOpenDedicated: { preset in pendingPreset = preset; showVSCode = true })
             }.fixedSize(horizontal: false, vertical: true)
             Text("저장소의 계정 정보입니다. 실행 중 세션은 아직 직접 확인하지 못하므로, 실제 앱에 표시된 계정과 다를 수 있습니다.")
                 .font(.system(size: 11)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
@@ -513,7 +530,7 @@ struct Dashboard: View {
                 Spacer()
                 Button { Task { await model.refreshUsage() } } label: { Label(model.refreshingUsage ? "조회 중…" : "사용량 확인", systemImage: "chart.bar") }
                     .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.refreshingUsage || model.presets.isEmpty)
-                Button { newAccountName = ""; showAdd = true } label: { Label("계정 추가", systemImage: "plus") }.buttonStyle(DockButtonStyle(kind: .primary)).disabled(model.busy)
+                Button { newAccountName = ""; showAdd = true } label: { Label("계정 추가", systemImage: "plus") }.buttonStyle(DockButtonStyle(kind: .primary)).disabled(model.busy || model.refreshingUsage)
                 Button { presetName = ""; showSave = true } label: { Label("계정 이름 지정", systemImage: "pencil") }
                     .font(.system(size: 11)).buttonStyle(DockButtonStyle(kind: .quiet))
                     .disabled(!model.connected || !model.supportsPresets || model.busy)

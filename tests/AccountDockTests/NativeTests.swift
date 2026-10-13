@@ -8,6 +8,23 @@ final class NativeTests: XCTestCase {
         addTeardownBlock { try FileManager.default.removeItem(at: url) }
         return url
     }
+    @MainActor func testUsageBatchRunsConcurrentlyAndKeepsOtherResultsAfterFailure() async {
+        let accounts = (0..<5).map { AccountPreset(id: String($0), name: "Fixture", email: "fixture@example.com", plan: nil, savedAt: Date(), credential: Data([UInt8($0)])) }
+        final class Counter { var active = 0; var peak = 0 }
+        let counter = Counter()
+        var results: [String: UsageReport] = [:]
+        await UsageBatch.read(accounts, limit: 3, reader: { credential in
+            counter.active += 1; counter.peak = max(counter.peak, counter.active)
+            defer { counter.active -= 1 }
+            try await Task.sleep(for: .milliseconds(30))
+            if credential.first == 1 { throw CancellationError() }
+            return UsageReport(status: "available", windows: [], activity: [:], checkedAt: 1)
+        }) { id, report in results[id] = report }
+        XCTAssertEqual(counter.peak, 3)
+        XCTAssertEqual(results.count, 5)
+        XCTAssertEqual(results["1"]?.status, "unavailable")
+        XCTAssertEqual(results["4"]?.status, "available")
+    }
     func testConnectionGroupingAndExcludingConnectedAccounts() {
         let rows = ["1", "2"].map { AppIdentity(id: $0, product: "codex", status: "stored_account", email: "a@example.com", plan: nil, home: "/shared", version: $0) }
             + [AppIdentity(id: "3", product: "codex", status: "stored_account", email: "b@example.com", plan: nil, home: "/dedicated", version: "2")]
