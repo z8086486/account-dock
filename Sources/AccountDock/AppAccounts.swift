@@ -133,10 +133,7 @@ struct AppAccountCard: View {
     @State private var selectedID: String?
     private var displayedAccounts: [AppIdentity] { AppAccountPresentation.grouped(accounts) }
     private var choices: [AccountPreset] {
-        let targets = onOpenDedicated == nil ? accounts : accounts.filter {
-            $0.home == VSCodeIsolation.home.path
-        }
-        return AppAccountPresentation.choices(presets, accounts: targets)
+        AppAccountPresentation.choices(presets, accounts: accounts)
     }
     private var selected: AccountPreset? { choices.first { $0.id == selectedID } }
     var body: some View {

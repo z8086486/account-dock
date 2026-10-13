@@ -36,6 +36,16 @@ final class DockModel: ObservableObject {
     var connected: Bool { report?.codex.status == "cached_account" }
     var supportsPresets: Bool { report?.file_presets_supported == true && report?.codex.type == "chatgpt" }
 
+    func renameAccount(_ preset: AccountPreset, name: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            try await AccountVault.shared.renameAccount(preset.id, name: name)
+            await loadPresets()
+            message = "계정 이름을 저장했습니다."
+        } catch { message = error.localizedDescription }
+    }
     func loadPresets() async {
         let wasBusy = busy
         busy = true; waitingForKeychain = true
@@ -299,7 +309,8 @@ struct Dashboard: View {
     @State private var selection = "accounts"
     @AppStorage("accountDock.setupCompleted.v1") private var setupCompleted = false
     @State private var showSetup = false
-    @State private var showSave = false
+    @State private var renamingPreset: AccountPreset?
+    @State private var menuRefresh = 0
     @State private var showAdd = false
     @State private var showVSCode = false
     @State private var newAccountName = ""
@@ -331,7 +342,7 @@ struct Dashboard: View {
                     }
                     if selection == "accounts" {
                         targets
-                    } else if selection == "updates" { UpdatePanel(center: updates) } else if selection == "access" { SetupPanel() } else {
+                    } else if selection == "updates" { UpdatePanel(center: updates) } else if selection == "access" { SetupPanel(refreshToken: menuRefresh) } else {
                         presetSection
                         DisclosureGroup("공유 인증 관리 · 고급") { overview.padding(.top, 12) }
                     }
@@ -344,13 +355,20 @@ struct Dashboard: View {
         .task {
             if setupCompleted { await start() } else { showSetup = true }
         }
-        .task(id: selection) {
-            guard selection == "presets" else { return }
-            while model.busy {
+        .task(id: menuRefresh) {
+            guard menuRefresh > 0, setupCompleted else { return }
+            while model.busy || model.refreshingUsage {
                 do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
             }
             guard !Task.isCancelled else { return }
-            await model.refreshUsage()
+            switch selection {
+            case "accounts": await model.request()
+            case "presets":
+                await model.loadPresets()
+                await model.refreshUsage()
+            case "updates": await updates.refresh(online: true)
+            default: break
+            }
         }
         .sheet(isPresented: $showSetup) {
             SetupPanel(firstLaunch: true) {
@@ -358,7 +376,7 @@ struct Dashboard: View {
                 Task { await start() }
             }.frame(width: 660, height: 650).interactiveDismissDisabled()
         }
-        .sheet(isPresented: $showSave) { saveSheet }
+        .sheet(item: $renamingPreset) { preset in saveSheet(preset) }
         .sheet(isPresented: $showAdd) {
             VStack(alignment: .leading, spacing: 18) {
                 Text("계정 추가").font(.title2.weight(.semibold))
@@ -419,7 +437,7 @@ struct Dashboard: View {
             .overlay(alignment: .trailing) { Rectangle().fill(DockTheme.orange).frame(width: 4) }
     }
     private func nav(_ title: String, icon: String, id: String) -> some View {
-        Button { selection = id } label: {
+        Button { selection = id; menuRefresh += 1 } label: {
             HStack(spacing: 10) {
                 Image(systemName: icon).frame(width: 18)
                 Text(title).font(.system(size: 12, weight: selection == id ? .semibold : .regular))
@@ -512,9 +530,7 @@ struct Dashboard: View {
                 Button { Task { await model.refreshUsage() } } label: { Label(model.refreshingUsage ? "조회 중…" : "사용량 확인", systemImage: "chart.bar") }
                     .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.refreshingUsage || model.presets.isEmpty)
                 Button { newAccountName = ""; showAdd = true } label: { Label("계정 추가", systemImage: "plus") }.buttonStyle(DockButtonStyle(kind: .primary)).disabled(model.busy || model.refreshingUsage)
-                Button { presetName = ""; showSave = true } label: { Label("계정 이름 지정", systemImage: "pencil") }
-                    .font(.system(size: 11)).buttonStyle(DockButtonStyle(kind: .quiet))
-                    .disabled(!model.connected || !model.supportsPresets || model.busy)
+
             }
             if model.presets.isEmpty {
                 HStack(spacing: 16) {
@@ -541,6 +557,10 @@ struct Dashboard: View {
                         }
                         Spacer()
                         Text(preset.savedAt, style: .date).font(.system(size: 10)).foregroundStyle(muted)
+                        Button {
+                            presetName = preset.name; renamingPreset = preset
+                        } label: { Label("이름 변경", systemImage: "pencil") }
+                            .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.busy)
                         Button { pendingDelete = preset; showDelete = true } label: { Image(systemName: "trash").accessibilityLabel("저장한 계정 삭제") }
                             .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.busy || model.activeAccountID == preset.id)
                     }
@@ -571,17 +591,20 @@ struct Dashboard: View {
             .font(.system(size: 10)).foregroundStyle(green ? ink : muted)
             .padding(.horizontal, 9).padding(.vertical, 5).background((green ? ink : muted).opacity(0.08), in: Capsule())
     }
-    private var saveSheet: some View {
+    private func saveSheet(_ preset: AccountPreset) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("계정 이름 지정").font(.title2.weight(.semibold))
-            Text("개인용, 업무용처럼 알아보기 쉬운 이름을 정하세요. 같은 계정은 중복 등록하지 않습니다.")
+            Text("\(preset.email)의 이름을 지정하세요. 로그인 정보는 변경하지 않습니다.")
                 .font(.system(size: 12)).foregroundStyle(muted)
             TextField("예: 개인용, 업무용", text: $presetName).textFieldStyle(.plain).padding(13).background(.white, in: RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(ink.opacity(0.15)))
             HStack {
                 Spacer()
-                Button("취소") { showSave = false }.buttonStyle(DockButtonStyle())
-                Button("저장") { let name = presetName; showSave = false; Task { await model.savePreset(name: name) } }
+                Button("취소") { renamingPreset = nil }.buttonStyle(DockButtonStyle())
+                Button("저장") {
+                    let name = presetName; renamingPreset = nil
+                    Task { await model.renameAccount(preset, name: name) }
+                }
                     .buttonStyle(DockButtonStyle(kind: .primary))
                     .disabled(presetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }

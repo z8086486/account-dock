@@ -92,6 +92,17 @@ enum PresetVault {
         try save(candidate, serviceName: serviceName)
         return candidate
     }
+    static func renameAccount(_ id: String, name: String, serviceName: String = service) throws {
+        let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty else { throw DockError.message("계정 이름을 입력해 주세요.") }
+        guard var latest = try all(serviceName: serviceName).first(where: { $0.id == id }) else {
+            throw DockError.message("저장한 계정을 찾지 못했습니다. 목록을 새로고침해 주세요.")
+        }
+        latest.name = label
+        let status = SecItemUpdate(query(id, serviceName: serviceName) as CFDictionary,
+            [kSecValueData as String: try JSONEncoder().encode(latest)] as CFDictionary)
+        guard status == errSecSuccess else { throw DockError.message("계정 이름을 저장하지 못했습니다.") }
+    }
     static func delete(_ id: String, serviceName: String = service) throws {
         let status = SecItemDelete(query(id, serviceName: serviceName) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
@@ -151,8 +162,11 @@ actor AccountVault {
     func upsert(_ entry: AccountPreset, preserveName: Bool = true) throws -> AccountPreset {
         try PresetVault.upsert(entry, preserveName: preserveName)
     }
+    func renameAccount(_ id: String, name: String) throws { try PresetVault.renameAccount(id, name: name) }
     func delete(_ id: String) throws { try PresetVault.delete(id) }
     func checkAccess() throws -> Bool {
+        // Check real saved items too; a new probe alone does not validate their ACLs.
+        _ = try PresetVault.all()
         let probe = AccountPreset(id: UUID().uuidString, name: "access-check", email: "", plan: nil,
                                   savedAt: Date(), credential: Data("access-check".utf8))
         let service = "app.accountdock.access-check"

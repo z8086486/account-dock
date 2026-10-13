@@ -35,6 +35,22 @@ final class PresetTests: XCTestCase {
         try PresetVault.upsert(candidate("별도 조직", "workspace-b", "other"), serviceName: service)
         XCTAssertEqual(try PresetVault.all(serviceName: service).count, 2)
     }
+    func testRenamePreservesLatestCredentialAndRejectsMissingOrEmptyName() throws {
+        let service = "app.accountdock.tests.\(UUID().uuidString)"
+        let entry = AccountPreset(id: UUID().uuidString, name: "Old", email: "test@example.com",
+            plan: "plus", savedAt: Date(), credential: Data("latest-token-fixture".utf8))
+        defer { try? PresetVault.delete(entry.id, serviceName: service) }
+        try PresetVault.save(entry, serviceName: service)
+        try PresetVault.renameAccount(entry.id, name: "  업무용  ", serviceName: service)
+        let renamed = try XCTUnwrap(PresetVault.all(serviceName: service).first)
+        XCTAssertEqual(renamed.name, "업무용")
+        XCTAssertEqual(renamed.id, entry.id)
+        XCTAssertEqual(renamed.credential, entry.credential)
+        XCTAssertEqual(renamed.savedAt, entry.savedAt)
+        XCTAssertThrowsError(try PresetVault.renameAccount(entry.id, name: "  ", serviceName: service))
+        XCTAssertThrowsError(try PresetVault.renameAccount("missing", name: "Test", serviceName: service))
+        XCTAssertEqual(try PresetVault.all(serviceName: service).count, 1)
+    }
     func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

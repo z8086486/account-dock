@@ -61,6 +61,7 @@ struct DockIcon: View {
 struct SetupPanel: View {
     @StateObject private var access = AccessSetup()
     @AppStorage("accountDock.usageEnabled") private var usageEnabled = true
+    var refreshToken = 0
     var firstLaunch = false
     var onContinue: () -> Void = {}
     var body: some View {
@@ -77,7 +78,7 @@ struct SetupPanel: View {
             accessCard("01", title: "로그인 정보 읽기", reason: "현재 로그인한 계정을 찾아 저장한 계정에 자동 등록합니다. 선택한 Codex 폴더의 인증 파일을 사용합니다. 앱별 표시는 해당 앱의 실행 경로와 인증 폴더도 확인합니다.", status: access.fileStatus) {
                 Button("폴더 선택") { access.selectFolder() }.buttonStyle(DockButtonStyle())
             }
-            accessCard("02", title: "macOS Keychain", reason: "계정을 다시 선택할 수 있도록 인증 정보를 암호화해 이 Mac에 보관합니다. macOS 접근 요청이 나타나면 허용해 주세요.", status: access.keychainStatus) {
+            accessCard("02", title: "macOS Keychain", reason: "계정을 다시 선택할 수 있도록 인증 정보를 암호화해 이 Mac에 보관합니다. macOS 접근 요청에서 ‘항상 허용’을 선택하면 같은 앱의 다음 접근에도 적용됩니다. 개발 프리뷰는 빌드 서명이 바뀌면 다시 요청될 수 있습니다.", status: access.keychainStatus) {
                 Button("Keychain 열기") {
                     NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Library/CoreServices/Applications/Keychain Access.app"))
                 }.buttonStyle(DockButtonStyle())
@@ -101,6 +102,7 @@ struct SetupPanel: View {
             }
         }.padding(28).frame(maxWidth: 660).background(DockTheme.canvas)
             .foregroundStyle(DockTheme.navy)
+            .task(id: refreshToken) { await access.check() }
     }
     private func accessCard<Content: View>(_ number: String, title: String, reason: String, status: String,
                                           @ViewBuilder action: () -> Content) -> some View {
