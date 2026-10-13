@@ -48,7 +48,7 @@ python3 scripts/package_app.py --dmg
 
 ## GitHub Actions
 
-Actions의 **Build macOS preview**를 수동 실행하면 테스트 후 ZIP/DMG와 해시를 Actions Artifact로 보관합니다. 자동 태그, GitHub Release 생성 또는 공개는 수행하지 않습니다. 소스의 `.github/workflows/preview.yml`이 이 동작을 정의합니다. 호스팅 러너에서의 최초 실행은 별도 검증해야 합니다.
+Actions의 **Build macOS preview**를 수동 실행하면 테스트 후 ZIP/DMG와 해시를 Actions Artifact로 보관합니다. 자동 태그, GitHub Release 생성 또는 공개는 수행하지 않습니다. 소스의 `.github/workflows/preview.yml`이 이 동작을 정의합니다. [macOS 15 러너 검증](https://github.com/z8086486/account-dock/actions/runs/38370105277)에서 Swift·Python 테스트와 APP/DMG 패키징·Artifact 업로드가 통과했습니다. 다운로드 후 깨끗한 Mac에서의 실행과 서명 업데이트는 별도 검증 대상입니다.
 
 ## 서명된 앱과 자체 업데이트
 

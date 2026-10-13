@@ -12,7 +12,8 @@ final class AccessSetup: ObservableObject {
         ?? ProcessInfo.processInfo.environment["CODEX_HOME"]
         ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex").path
     }
-    func check() {
+    func check() async {
+        guard !checking else { return }
         checking = true
         defer { checking = false }
         let path = URL(fileURLWithPath: Self.home).appendingPathComponent("auth.json").path
@@ -23,14 +24,9 @@ final class AccessSetup: ObservableObject {
             fileReady = FileManager.default.isReadableFile(atPath: path)
             fileStatus = fileReady ? "읽기 가능 · 현재 계정을 불러올 수 있습니다" : "접근 불가 · 로그인 폴더를 직접 선택해 주세요"
         }
-        let probe = AccountPreset(id: UUID().uuidString, name: "access-check", email: "", plan: nil,
-                                  savedAt: Date(), credential: Data("access-check".utf8))
-        let service = "app.accountdock.access-check"
-        defer { try? PresetVault.delete(probe.id, serviceName: service) }
+        keychainStatus = "macOS Keychain 접근 요청을 확인해 주세요"
         do {
-            try PresetVault.save(probe, serviceName: service)
-            let values = try PresetVault.all(serviceName: service)
-            keychainReady = values.contains { $0.id == probe.id }
+            keychainReady = try await AccountVault.shared.checkAccess()
             keychainStatus = keychainReady ? "읽기·저장 확인 완료" : "접근을 확인하지 못했습니다"
         } catch {
             keychainReady = false
@@ -46,7 +42,7 @@ final class AccessSetup: ObservableObject {
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             UserDefaults.standard.set(url.path, forKey: "accountDock.authHome")
-            self.check()
+            Task { await self.check() }
         }
     }
 }
@@ -95,7 +91,7 @@ struct SetupPanel: View {
             Text("현재 기능에는 전체 디스크 접근·화면 기록·손쉬운 사용 권한이 필요하지 않습니다.")
                 .font(.system(size: 10)).foregroundStyle(DockTheme.muted)
             HStack {
-                Button(access.checking ? "확인 중…" : "접근 확인") { access.check() }
+                Button(access.checking ? "확인 중…" : "접근 확인") { Task { await access.check() } }
                     .buttonStyle(DockButtonStyle()).disabled(access.checking)
                 Spacer()
                 if firstLaunch {

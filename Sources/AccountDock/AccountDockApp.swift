@@ -31,11 +31,15 @@ final class DockModel: ObservableObject {
     @Published var refreshingUsage = false
     private var connection: CodexConnection?
     @Published var addingAccount = false
+    @Published var waitingForKeychain = false
     var connected: Bool { report?.codex.status == "cached_account" }
     var supportsPresets: Bool { report?.file_presets_supported == true && report?.codex.type == "chatgpt" }
 
-    func loadPresets() {
-        do { presets = try PresetVault.all() }
+    func loadPresets() async {
+        let wasBusy = busy
+        busy = true; waitingForKeychain = true
+        defer { busy = wasBusy; waitingForKeychain = false }
+        do { presets = try await AccountVault.shared.all() }
         catch { message = error.localizedDescription }
     }
     func request(_ action: String = "status") async {
@@ -57,7 +61,7 @@ final class DockModel: ObservableObject {
             }
             report = action == "status" ? updated : try await run("status")
             lastChecked = Date()
-            registerCurrentAccount()
+            await registerCurrentAccount()
             if action != "status" { message = "공유 저장소에서 로그아웃했습니다. 저장한 계정은 유지됩니다." }
         } catch { report = nil; activeAccountID = nil; message = error.localizedDescription }
     }
@@ -124,8 +128,8 @@ final class DockModel: ObservableObject {
             let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
             let entry = AccountPreset(id: UUID().uuidString, name: label.isEmpty ? String(email.split(separator: "@").first ?? "계정") : label,
                 email: email, plan: result.codex.plan, savedAt: Date(), credential: credential)
-            try PresetVault.upsert(entry, preserveName: label.isEmpty)
-            loadPresets()
+            try await AccountVault.shared.upsert(entry, preserveName: label.isEmpty)
+            await loadPresets()
             message = "계정을 추가했습니다. 사용할 계정은 목록에서 선택하세요. 현재 로그인은 변경하지 않았습니다."
         } catch is CancellationError { message = "계정 추가를 취소했습니다. 현재 로그인은 유지됩니다." }
         catch { message = error.localizedDescription }
@@ -135,6 +139,9 @@ final class DockModel: ObservableObject {
     func savePreset(name: String) async {
         guard !busy else { return }
         await request()
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
         guard let report, connected, supportsPresets, let email = report.codex.email else {
             message = "파일 방식으로 로그인한 ChatGPT 계정만 저장할 수 있습니다. 공식 Codex 실행 파일이 필요합니다."
             return
@@ -143,8 +150,8 @@ final class DockModel: ObservableObject {
             let credential = try PresetVault.credential(at: report.codex_home, expectedEmail: email)
             let preset = AccountPreset(id: UUID().uuidString, name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                                        email: email, plan: report.codex.plan, savedAt: Date(), credential: credential)
-            try PresetVault.upsert(preset, preserveName: false)
-            loadPresets()
+            try await AccountVault.shared.upsert(preset, preserveName: false)
+            await loadPresets()
             message = "저장한 계정을 이 Mac의 Keychain에 저장했습니다."
         } catch { message = error.localizedDescription }
     }
@@ -160,7 +167,7 @@ final class DockModel: ObservableObject {
             guard current.file_presets_supported, ["cached_account", "signed_out"].contains(current.codex.status) else {
                 throw DockError.message("파일 방식 인증을 확인하지 못해 전환하지 않았습니다.")
             }
-            let latest = (try PresetVault.all()).first { $0.id == preset.id } ?? preset
+            let latest = (try await AccountVault.shared.all()).first { $0.id == preset.id } ?? preset
             let validation = try await UsageReader.read(latest.credential)
             guard ["available", "partial"].contains(validation.status) else {
                 throw DockError.message(validation.status == "login_required" ? "저장된 인증이 만료되었습니다. 계정 추가에서 다시 로그인해 주세요. 현재 계정은 유지됩니다." : "인증 유효성을 확인하지 못해 전환하지 않았습니다. 네트워크를 확인해 주세요.")
@@ -170,15 +177,15 @@ final class DockModel: ObservableObject {
                 guard let email = current.codex.email, current.codex.type == "chatgpt" else { throw DockError.message("현재 인증의 자동 백업을 지원하지 않아 전환하지 않았습니다.") }
                 let credential = try PresetVault.credential(at: home.path, expectedEmail: email)
                 guard credential == before else { throw DockError.message("인증 정보가 변경되어 전환을 중단했습니다.") }
-                try PresetVault.upsert(AccountPreset(id: UUID().uuidString, name: "전환 전 자동 백업", email: email, plan: current.codex.plan, savedAt: Date(), credential: credential))
+                try await AccountVault.shared.upsert(AccountPreset(id: UUID().uuidString, name: "전환 전 자동 백업", email: email, plan: current.codex.plan, savedAt: Date(), credential: credential))
             }
             try AuthTransaction.install(latest.credential, home: home, expected: before) { try ActivityGate.requireIdle() }
             report = AccountReport(codex: AccountInfo(status: "cached_account", type: "chatgpt", email: latest.email, plan: latest.plan, reason: nil), codex_home: home.path, file_presets_supported: true)
-            registerCurrentAccount()
+            await registerCurrentAccount()
             message = "계정을 적용했습니다. 앱을 다시 열어 로그인 계정을 확인해 주세요."
         } catch { message = error.localizedDescription }
     }
-    func registerCurrentAccount() {
+    func registerCurrentAccount() async {
         activeAccountID = nil
         guard let report, connected, supportsPresets, let email = report.codex.email else { return }
         do {
@@ -186,8 +193,8 @@ final class DockModel: ObservableObject {
             let entry = AccountPreset(id: UUID().uuidString,
                 name: String(email.split(separator: "@").first ?? "계정"), email: email,
                 plan: report.codex.plan, savedAt: Date(), credential: credential)
-            activeAccountID = try PresetVault.upsert(entry).id
-            loadPresets()
+            activeAccountID = try await AccountVault.shared.upsert(entry).id
+            await loadPresets()
         } catch { message = "현재 계정을 자동 등록하지 못했습니다. 접근 및 개인정보 화면에서 Keychain 접근을 확인해 주세요." }
     }
     func refreshUsage() async {
@@ -206,8 +213,11 @@ final class DockModel: ObservableObject {
             usageLoading.remove(account.id)
         }
     }
-    func remove(_ preset: AccountPreset) {
-        do { try PresetVault.delete(preset.id); loadPresets() }
+    func remove(_ preset: AccountPreset) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do { try await AccountVault.shared.delete(preset.id); await loadPresets() }
         catch { message = error.localizedDescription }
     }
 }
@@ -237,13 +247,13 @@ struct Dashboard: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 25) {
                     header
-                    if let message = model.message {
+                    if let message = model.waitingForKeychain ? "Keychain 접근 응답을 기다리고 있습니다. macOS 접근 요청을 확인해 주세요." : model.message {
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: "info.circle")
                             Text(message).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
                             Spacer()
-                            if model.busy { Button("취소") { model.cancel() } }
-                            else { Button { model.message = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }
+                            if model.busy && !model.waitingForKeychain { Button("취소") { model.cancel() } }
+                            else if !model.waitingForKeychain { Button { model.message = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }
                         }.padding(14).background(accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                     }
                     if selection == "accounts" {
@@ -291,12 +301,12 @@ struct Dashboard: View {
         } message: { _ in Text("현재 계정은 Keychain에 자동 백업합니다. 공유 저장소를 사용하는 앱에 함께 적용되며, 만료된 인증은 다시 로그인해야 합니다.") }
         .alert("저장한 계정을 삭제할까요?", isPresented: $showDelete, presenting: pendingDelete) { preset in
             Button("취소", role: .cancel) {}
-            Button("삭제", role: .destructive) { model.remove(preset) }
+            Button("삭제", role: .destructive) { Task { await model.remove(preset) } }
         } message: { _ in Text("Keychain에 저장한 이 계정의 인증 정보가 삭제됩니다. 현재 로그인에는 영향을 주지 않습니다.") }
     }
 
     private func start() async {
-        model.loadPresets()
+        await model.loadPresets()
         await model.request()
         await updates.refresh()
         await model.refreshUsage()

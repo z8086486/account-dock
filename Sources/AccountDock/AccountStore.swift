@@ -15,7 +15,7 @@ struct AccountReport: Decodable {
     let codex_home: String
     let file_presets_supported: Bool
 }
-struct AccountPreset: Codable, Identifiable {
+struct AccountPreset: Codable, Identifiable, Sendable {
     let id: String
     var name: String
     let email: String
@@ -139,5 +139,25 @@ enum PresetVault {
         guard rename(temporary.path, destination.path) == 0 else {
             throw DockError.message("인증 파일을 적용하지 못했습니다. 기존 계정은 유지됩니다.")
         }
+    }
+}
+
+// Keychain can wait for an OS access prompt. Keep it off the UI executor and
+// serialize operations so adding/updating an identity remains ordered.
+actor AccountVault {
+    static let shared = AccountVault()
+    func all() throws -> [AccountPreset] { try PresetVault.all() }
+    @discardableResult
+    func upsert(_ entry: AccountPreset, preserveName: Bool = true) throws -> AccountPreset {
+        try PresetVault.upsert(entry, preserveName: preserveName)
+    }
+    func delete(_ id: String) throws { try PresetVault.delete(id) }
+    func checkAccess() throws -> Bool {
+        let probe = AccountPreset(id: UUID().uuidString, name: "access-check", email: "", plan: nil,
+                                  savedAt: Date(), credential: Data("access-check".utf8))
+        let service = "app.accountdock.access-check"
+        defer { try? PresetVault.delete(probe.id, serviceName: service) }
+        try PresetVault.save(probe, serviceName: service)
+        return try PresetVault.all(serviceName: service).contains { $0.id == probe.id }
     }
 }
