@@ -16,7 +16,7 @@ jobs:
       - name: Test Python
         run: python3 -m unittest discover -s tests -v
       - name: Package preview (no public release)
-        run: python3 scripts/package_app.py --dmg
+        run: python3 scripts/package_app.py --dmg --development
       - uses: actions/upload-artifact@v4
         with:
           name: AccountDock-macOS-preview

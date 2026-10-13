@@ -18,6 +18,17 @@ final class NativeTests: XCTestCase {
         XCTAssertNil(try VersionService.downloadableRelease(Data("[]".utf8), architecture: "arm64", includePreviews: true))
         XCTAssertThrowsError(try VersionService.downloadableRelease(Data("{}".utf8), architecture: "arm64", includePreviews: true))
     }
+    func testAccountLabelsPreferNamesAndHandleAmbiguousEmails() {
+        let named = AccountPreset(id: "a", name: " 업무 ", email: "test@example.com", plan: "plus", savedAt: Date(), credential: Data())
+        let unnamed = AccountPreset(id: "b", name: "  ", email: "other@example.com", plan: nil, savedAt: Date(), credential: Data())
+        XCTAssertEqual(named.displayName, "업무")
+        XCTAssertEqual(named.planLabel, "Plus")
+        XCTAssertEqual(unnamed.displayName, "other@example.com")
+        XCTAssertEqual(unnamed.planLabel, "플랜 확인 필요")
+        XCTAssertEqual(AppAccountPresentation.displayName("TEST@example.com", presets: [named]), "업무")
+        let otherOrganization = AccountPreset(id: "c", name: "다른 조직", email: named.email, plan: nil, savedAt: Date(), credential: Data())
+        XCTAssertEqual(AppAccountPresentation.displayName(named.email, presets: [named, otherOrganization]), named.email)
+    }
     func home() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

@@ -1,6 +1,6 @@
 # 배포 가이드
 
-Account Dock은 GitHub Releases에서 macOS 프리뷰를 배포합니다. 현재 Apple Silicon용이며, 앱 내 업데이트에는 Sparkle 2와 Ed25519 서명을 사용합니다. Apple Developer ID 서명·공증은 아직 적용하지 않습니다.
+Account Dock은 GitHub Releases에서 macOS 프리뷰를 배포합니다. 현재 Apple Silicon용이며, 앱 내 업데이트에는 Sparkle 2와 Ed25519 서명을 사용합니다. Apple Developer ID 서명·공증은 적용하지 않습니다. 프리뷰 앱과 계정 보관 모듈은 로컬 발급 코드 서명 인증서로 서명합니다. 이 인증서를 시스템 신뢰 루트에 추가하지 않습니다.
 
 ## 버전과 패키징
 
@@ -12,7 +12,19 @@ python3 -m unittest discover -s tests -v
 python3 scripts/package_app.py --dmg
 ```
 
+배포 담당 Mac에는 `codeSigningCertificate`와 일치하는 개인 키, 그리고 `.local/vault/AccountDockVault`가 필요합니다. 개인 키는 Keychain에만 보관합니다.
+
 `dist/<version>-<architecture>/`에 APP, ZIP, DMG, SHA256SUMS가 생성됩니다. 로컬 설치까지 하려면 `--install`을 추가합니다. 이미 생성한 버전의 출력 폴더는 덮어쓰지 않습니다.
+
+## 계정 보관 모듈
+
+`Contents/Helpers/AccountDockVault`가 Keychain을 사용합니다. 앱은 stdin/stdout 파이프로 요청하고, 모듈은 부모 프로세스의 앱 식별자와 서명 인증서를 확인합니다. 인증 정보는 프로세스 인자에 넣지 않습니다.
+
+일반 업데이트에서는 보관 모듈을 **다시 빌드하거나 서명하지 않습니다.** 이전 배포의 모듈을 그대로 사용하고 release.json의 `vaultHelperSHA256`을 검사합니다. 캐시를 잃었다면 이전 배포 ZIP에서 모듈을 복원하세요. 모듈이나 서명 정책을 변경하면 다시 Keychain 승인이 필요할 수 있습니다.
+
+모듈을 수정해야 하는 경우 `AccountStore.swift`와 `scripts/VaultHelper.swift`를 `swiftc -O -D ACCOUNT_DOCK_VAULT`로 빌드하고 `app.accountdock.vault` 식별자로 서명한 뒤 해시를 갱신합니다. 부모 앱의 인증서 핀도 함께 검토해야 합니다. 모듈은 Apple이 발급한 인증서인 것처럼 취급하지 않습니다.
+
+배포 키가 없는 개발 환경·CI에서는 `package_app.py --dmg --development`를 사용합니다. 개발 패키지는 업데이트 기능·고정 보관 모듈을 사용하지 않으며 배포 피드에 게시할 수 없습니다. 업데이트 피드 생성기는 앱의 배포 서명을 확인합니다.
 
 ## 업데이트 서명
 

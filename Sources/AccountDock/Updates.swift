@@ -102,8 +102,7 @@ struct UpdatePanel: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("연결된 도구의 버전").font(.system(size: 17, weight: .semibold))
-                    Text("최신 버전과 확인된 호환 범위를 따로 관리합니다.").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                    Text("설치된 앱").font(.system(size: 17, weight: .semibold))
                 }
                 Spacer()
                 Button { Task { await center.refresh(online: true) } } label: {
@@ -119,7 +118,7 @@ struct UpdatePanel: View {
                     HStack {
                         Text(product.name).font(.system(size: 16, weight: .semibold))
                         Spacer()
-                        Text(product.update_available ? "UPDATE AVAILABLE" : product.id == "accountdock" ? "PREVIEW" : product.known_version ? "OBSERVED" : "NOT VERIFIED")
+                        Text(product.update_available ? "UPDATE AVAILABLE" : product.id == "accountdock" ? (product.check == "checked" ? "최신" : "확인 전") : product.known_version ? "OBSERVED" : "NOT VERIFIED")
                             .font(.system(size: 9, weight: .bold)).tracking(1)
                             .padding(.horizontal, 10).padding(.vertical, 6)
                             .background(product.update_available ? DockTheme.orange.opacity(0.18) : DockTheme.blue.opacity(0.35), in: Capsule())
@@ -161,10 +160,10 @@ struct UpdatePanel: View {
                     .overlay(RoundedRectangle(cornerRadius: 16).stroke(DockTheme.navy.opacity(0.09)))
             }
             Group {
-                Text("프리뷰는 Apple 공증을 받지 않았습니다. macOS 실행 확인과 업데이트 후 Keychain 접근 요청이 나타날 수 있습니다. 저장한 계정은 앱 외부의 Keychain에 유지됩니다.")
+                Text("Apple 공증 미적용 · 설치 시 macOS 확인이 필요할 수 있습니다.")
                     .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
             }
-            Text("ChatGPT 업데이트 설치는 공식 앱에서 진행합니다. 확장 버전은 기본 로컬 VS Code 설치 기준이며, 실행 중인 버전과 다를 수 있습니다.")
+            Text("ChatGPT는 공식 앱에서 업데이트하세요.")
                 .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
             if let date = center.checkedAt {
                 Text("마지막 온라인 확인 · \(date.formatted(date: .abbreviated, time: .shortened))").font(.system(size: 10)).foregroundStyle(DockTheme.muted)

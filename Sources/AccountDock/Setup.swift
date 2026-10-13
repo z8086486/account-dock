@@ -69,16 +69,16 @@ struct SetupPanel: View {
             HStack(spacing: 15) {
                 DockIcon(size: 68)
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(firstLaunch ? "계정을 모으기 전에." : "접근 및 개인정보")
+                    Text(firstLaunch ? "초기 설정" : "접근 권한")
                         .font(.system(size: 25, weight: .semibold))
-                    Text("필요한 접근과 사용 목적을 먼저 확인해 주세요.")
+                    Text("계정 저장에 필요한 접근을 확인합니다.")
                         .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
             }
-            accessCard("01", title: "로그인 정보 읽기", reason: "현재 로그인한 계정을 찾아 저장한 계정에 자동 등록합니다. 선택한 Codex 폴더의 인증 파일을 사용합니다. 앱별 표시는 해당 앱의 실행 경로와 인증 폴더도 확인합니다.", status: access.fileStatus) {
+            accessCard("01", title: "로그인 정보 읽기", reason: "Codex 인증 파일에서 계정을 읽습니다.", status: access.fileStatus) {
                 Button("폴더 선택") { access.selectFolder() }.buttonStyle(DockButtonStyle())
             }
-            accessCard("02", title: "macOS Keychain", reason: "계정을 다시 선택할 수 있도록 인증 정보를 암호화해 이 Mac에 보관합니다. macOS 접근 요청에서 ‘항상 허용’을 선택하면 같은 앱의 다음 접근에도 적용됩니다. 개발 프리뷰는 빌드 서명이 바뀌면 다시 요청될 수 있습니다.", status: access.keychainStatus) {
+            accessCard("02", title: "macOS Keychain", reason: "인증 정보를 이 Mac에 저장합니다. 접근 요청에서 ‘항상 허용’을 선택하세요.", status: access.keychainStatus) {
                 Button("Keychain 열기") {
                     NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Library/CoreServices/Applications/Keychain Access.app"))
                 }.buttonStyle(DockButtonStyle())
@@ -86,11 +86,9 @@ struct SetupPanel: View {
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("계정별 온라인 사용량 조회", isOn: $usageEnabled).toggleStyle(.switch)
                     .font(.system(size: 13, weight: .medium))
-                Text("저장한 계정으로 OpenAI에 인증해 남은 한도를 조회합니다. 인증 정보는 명령줄이나 로그에 남기지 않습니다. 별도 macOS 권한은 필요 없으며 언제든 끌 수 있습니다.")
+                Text("OpenAI에 계정별 사용량을 요청합니다.")
                     .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
             }.padding(18).background(.white, in: RoundedRectangle(cornerRadius: 13))
-            Text("현재 기능에는 전체 디스크 접근·화면 기록·손쉬운 사용 권한이 필요하지 않습니다.")
-                .font(.system(size: 10)).foregroundStyle(DockTheme.muted)
             HStack {
                 Button(access.checking ? "확인 중…" : "접근 확인") { Task { await access.check() } }
                     .buttonStyle(DockButtonStyle()).disabled(access.checking)

@@ -22,6 +22,13 @@ struct AccountPreset: Codable, Identifiable, Sendable {
     let plan: String?
     let savedAt: Date
     let credential: Data
+    var displayName: String { name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? email : name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    var planLabel: String { Self.planLabel(plan) }
+    static func planLabel(_ plan: String?) -> String {
+        guard let plan, !plan.isEmpty else { return "플랜 확인 필요" }
+        if plan.lowercased() == "self_serve_business_prolite" { return "Business Pro Lite" }
+        return plan.replacingOccurrences(of: "_", with: " ").capitalized
+    }
     var identityKey: String {
         let json = (try? JSONSerialization.jsonObject(with: credential)) as? [String: Any]
         let tokens = json?["tokens"] as? [String: Any]
@@ -94,7 +101,6 @@ enum PresetVault {
     }
     static func renameAccount(_ id: String, name: String, serviceName: String = service) throws {
         let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !label.isEmpty else { throw DockError.message("계정 이름을 입력해 주세요.") }
         guard var latest = try all(serviceName: serviceName).first(where: { $0.id == id }) else {
             throw DockError.message("저장한 계정을 찾지 못했습니다. 목록을 새로고침해 주세요.")
         }
@@ -155,17 +161,54 @@ enum PresetVault {
 
 // Keychain can wait for an OS access prompt. Keep it off the UI executor and
 // serialize operations so adding/updating an identity remains ordered.
+#if !ACCOUNT_DOCK_VAULT
 actor AccountVault {
     static let shared = AccountVault()
-    func all() throws -> [AccountPreset] { try PresetVault.all() }
+    private func helperRequest(_ operation: String, entry: AccountPreset? = nil, id: String? = nil, name: String? = nil, preserveName: Bool = true) throws -> Data? {
+        // Source builds and unit tests keep using their own Keychain identity.
+        guard Bundle.main.bundleURL.pathExtension == "app",
+              Bundle.main.object(forInfoDictionaryKey: "AccountDockDevelopmentBuild") as? Bool != true else { return nil }
+        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/AccountDockVault")
+        guard FileManager.default.isExecutableFile(atPath: helper.path) else {
+            throw DockError.message("계정 저장 모듈이 없습니다. 앱을 다시 설치해 주세요.")
+        }
+        var request: [String: Any] = ["operation": operation, "preserveName": preserveName]
+        if let entry { request["entry"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(entry)) }
+        if let id { request["id"] = id }
+        if let name { request["name"] = name }
+        let process = Process(), input = Pipe(), output = Pipe()
+        process.executableURL = helper
+        process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice
+        try process.run()
+        do { try input.fileHandleForWriting.write(contentsOf: JSONSerialization.data(withJSONObject: request)) }
+        catch { process.terminate(); throw DockError.message("계정 저장 모듈에 요청하지 못했습니다.") }
+        try? input.fileHandleForWriting.close()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0, data.count <= 8_000_000,
+              let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any], response["ok"] as? Bool == true,
+              let payload = response["payload"] else {
+            throw DockError.message("Keychain 접근을 확인해 주세요. 저장 모듈의 접근 요청에서 ‘항상 허용’을 선택하세요.")
+        }
+        return try JSONSerialization.data(withJSONObject: payload, options: [.fragmentsAllowed])
+    }
+    func all() throws -> [AccountPreset] {
+        if let data = try helperRequest("all") { return try JSONDecoder().decode([AccountPreset].self, from: data) }
+        return try PresetVault.all()
+    }
     @discardableResult
     func upsert(_ entry: AccountPreset, preserveName: Bool = true) throws -> AccountPreset {
-        try PresetVault.upsert(entry, preserveName: preserveName)
+        if let data = try helperRequest("upsert", entry: entry, preserveName: preserveName) { return try JSONDecoder().decode(AccountPreset.self, from: data) }
+        return try PresetVault.upsert(entry, preserveName: preserveName)
     }
-    func renameAccount(_ id: String, name: String) throws { try PresetVault.renameAccount(id, name: name) }
-    func delete(_ id: String) throws { try PresetVault.delete(id) }
+    func renameAccount(_ id: String, name: String) throws {
+        if try helperRequest("rename", id: id, name: name) == nil { try PresetVault.renameAccount(id, name: name) }
+    }
+    func delete(_ id: String) throws {
+        if try helperRequest("delete", id: id) == nil { try PresetVault.delete(id) }
+    }
     func checkAccess() throws -> Bool {
-        // Check real saved items too; a new probe alone does not validate their ACLs.
+        if let data = try helperRequest("check") { return try JSONDecoder().decode(Bool.self, from: data) }
         _ = try PresetVault.all()
         let probe = AccountPreset(id: UUID().uuidString, name: "access-check", email: "", plan: nil,
                                   savedAt: Date(), credential: Data("access-check".utf8))
@@ -175,3 +218,4 @@ actor AccountVault {
         return try PresetVault.all(serviceName: service).contains { $0.id == probe.id }
     }
 }
+#endif

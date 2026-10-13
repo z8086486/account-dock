@@ -35,7 +35,7 @@ final class PresetTests: XCTestCase {
         try PresetVault.upsert(candidate("별도 조직", "workspace-b", "other"), serviceName: service)
         XCTAssertEqual(try PresetVault.all(serviceName: service).count, 2)
     }
-    func testRenamePreservesLatestCredentialAndRejectsMissingOrEmptyName() throws {
+    func testRenamePreservesCredentialAndAllowsClearingName() throws {
         let service = "app.accountdock.tests.\(UUID().uuidString)"
         let entry = AccountPreset(id: UUID().uuidString, name: "Old", email: "test@example.com",
             plan: "plus", savedAt: Date(), credential: Data("latest-token-fixture".utf8))
@@ -47,7 +47,8 @@ final class PresetTests: XCTestCase {
         XCTAssertEqual(renamed.id, entry.id)
         XCTAssertEqual(renamed.credential, entry.credential)
         XCTAssertEqual(renamed.savedAt, entry.savedAt)
-        XCTAssertThrowsError(try PresetVault.renameAccount(entry.id, name: "  ", serviceName: service))
+        try PresetVault.renameAccount(entry.id, name: "  ", serviceName: service)
+        XCTAssertEqual(try PresetVault.all(serviceName: service).first?.displayName, entry.email)
         XCTAssertThrowsError(try PresetVault.renameAccount("missing", name: "Test", serviceName: service))
         XCTAssertEqual(try PresetVault.all(serviceName: service).count, 1)
     }

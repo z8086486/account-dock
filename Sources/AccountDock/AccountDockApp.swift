@@ -140,7 +140,7 @@ final class DockModel: ObservableObject {
             }
             let credential = try PresetVault.credential(at: isolated.path, expectedEmail: email)
             let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            let entry = AccountPreset(id: UUID().uuidString, name: label.isEmpty ? String(email.split(separator: "@").first ?? "계정") : label,
+            let entry = AccountPreset(id: UUID().uuidString, name: label,
                 email: email, plan: result.codex.plan, savedAt: Date(), credential: credential)
             try await AccountVault.shared.upsert(entry, preserveName: label.isEmpty)
             await loadPresets()
@@ -194,7 +194,7 @@ final class DockModel: ObservableObject {
                 guard let email = current.codex.email, current.codex.type == "chatgpt" else { throw DockError.message("현재 인증의 자동 백업을 지원하지 않아 전환하지 않았습니다.") }
                 let credential = try PresetVault.credential(at: home.path, expectedEmail: email)
                 guard credential == before else { throw DockError.message("인증 정보가 변경되어 전환을 중단했습니다.") }
-                try await AccountVault.shared.upsert(AccountPreset(id: UUID().uuidString, name: "전환 전 자동 백업", email: email, plan: current.codex.plan, savedAt: Date(), credential: credential))
+                try await AccountVault.shared.upsert(AccountPreset(id: UUID().uuidString, name: "", email: email, plan: current.codex.plan, savedAt: Date(), credential: credential))
             }
             try AuthTransaction.install(latest.credential, home: home, expected: before) { try ActivityGate.requireIdle() }
             report = AccountReport(codex: AccountInfo(status: "cached_account", type: "chatgpt", email: latest.email, plan: latest.plan, reason: nil), codex_home: home.path, file_presets_supported: true)
@@ -233,7 +233,7 @@ final class DockModel: ObservableObject {
                 guard let email = identity.email else { throw DockError.message("전용 VS Code의 기존 계정을 백업할 수 없어 전환하지 않았습니다.") }
                 let credential = try PresetVault.credential(at: home.path, expectedEmail: email)
                 guard credential == before else { throw DockError.message("전용 인증이 변경되어 중단했습니다.") }
-                try await AccountVault.shared.upsert(AccountPreset(id: UUID().uuidString, name: "VS Code 이전 계정", email: email, plan: identity.plan, savedAt: Date(), credential: credential))
+                try await AccountVault.shared.upsert(AccountPreset(id: UUID().uuidString, name: "", email: email, plan: identity.plan, savedAt: Date(), credential: credential))
             }
             try AuthTransaction.install(latest.credential, home: home, expected: before) {
                 try VSCodeIsolation.validateDirectory(home)
@@ -269,11 +269,11 @@ final class DockModel: ObservableObject {
         do {
             let credential = try PresetVault.credential(at: report.codex_home, expectedEmail: email)
             let entry = AccountPreset(id: UUID().uuidString,
-                name: String(email.split(separator: "@").first ?? "계정"), email: email,
+                name: "", email: email,
                 plan: report.codex.plan, savedAt: Date(), credential: credential)
             activeAccountID = try await AccountVault.shared.upsert(entry).id
             await loadPresets()
-        } catch { message = "현재 계정을 자동 등록하지 못했습니다. 접근 및 개인정보 화면에서 Keychain 접근을 확인해 주세요." }
+        } catch { message = "현재 계정을 자동 등록하지 못했습니다. 설정 화면에서 Keychain 접근을 확인해 주세요." }
     }
     func refreshUsage(allowWhileAdding: Bool = false) async {
         guard !refreshingUsage, (!busy || (allowWhileAdding && addingAccount)) else { return }
@@ -386,7 +386,7 @@ struct Dashboard: View {
             VStack(alignment: .leading, spacing: 18) {
                 Text("계정 추가").font(.title2.weight(.semibold))
                 Text("별도 로그인 창에서 계정을 등록합니다. ChatGPT·VS Code의 현재 계정은 변경하지 않습니다.").font(.system(size: 12))
-                TextField("이름 (선택) · 개인용, 업무용", text: $newAccountName).textFieldStyle(.roundedBorder)
+                TextField("계정 이름 (선택)", text: $newAccountName).textFieldStyle(.roundedBorder)
                 HStack {
                     Spacer()
                     Button("취소") { showAdd = false }.buttonStyle(DockButtonStyle())
@@ -431,11 +431,10 @@ struct Dashboard: View {
             nav("계정 관리", icon: "square.grid.2x2", id: "accounts")
             nav("저장한 계정", icon: "person.crop.rectangle.stack", id: "presets")
             nav("버전 · 업데이트", icon: "arrow.down.circle", id: "updates")
-            nav("접근 및 개인정보", icon: "lock.shield", id: "access")
+            nav("설정", icon: "lock.shield", id: "access")
             Spacer()
-            Text("계정 정보는 이 Mac에 보관됩니다.").font(.system(size: 10)).foregroundStyle(DockTheme.blue.opacity(0.75)).padding(.bottom, 20)
             Divider()
-            Text("v\(ReleaseConfiguration.current.version) · PREVIEW").font(.system(size: 10)).foregroundStyle(DockTheme.blue.opacity(0.75)).padding(.vertical, 20)
+            Text("v\(ReleaseConfiguration.current.version)").font(.system(size: 10)).foregroundStyle(DockTheme.blue.opacity(0.75)).padding(.vertical, 20)
         }.padding(.horizontal, 22).frame(width: 210)
             .foregroundStyle(DockTheme.blue)
             .background(DockTheme.navy)
@@ -455,10 +454,9 @@ struct Dashboard: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 9) {
-                Text(selection == "accounts" ? "내 계정, 한눈에." : selection == "updates" ? "버전과 업데이트." : selection == "access" ? "필요한 접근만." : "다음에도, 이 계정으로.")
+                Text(selection == "accounts" ? "계정 관리" : selection == "updates" ? "업데이트" : selection == "access" ? "설정" : "저장한 계정")
                     .font(.system(size: 29, weight: .semibold))
-                Text(selection == "accounts" ? "연결 상태를 확인하고 저장한 계정으로 전환하세요." : selection == "updates" ? "설치부터 다음 업데이트까지, 한곳에서." : selection == "access" ? "계정 정보가 어디에 쓰이는지 확인하세요." : "이 Mac에 저장한 계정을 관리하세요.")
-                    .font(.system(size: 12)).foregroundStyle(muted)
+
             }
             Spacer()
             Button { Task { await model.request(); await updates.refresh(); await model.refreshUsage() } } label: {
@@ -479,7 +477,7 @@ struct Dashboard: View {
                     .font(.system(size: 23, weight: .medium)).frame(width: 54, height: 54)
                     .background(DockTheme.blue, in: RoundedRectangle(cornerRadius: 17))
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(model.report?.codex.email ?? (model.busy ? "계정을 확인하고 있어요" : model.report?.codex.status == "signed_out" ? "연결된 계정 없음" : "계정 확인 필요"))
+                    Text(model.report?.codex.email.map { AppAccountPresentation.displayName($0, presets: model.presets) } ?? (model.busy ? "확인 중" : model.report?.codex.status == "signed_out" ? "연결된 계정 없음" : "계정 확인 필요"))
                         .font(.system(size: 18, weight: .medium)).textSelection(.enabled)
                     Text(model.report?.codex.plan.map { "\($0.uppercased()) PLAN" } ?? "OpenAI account")
                         .font(.system(size: 10, weight: .medium)).tracking(1.5).foregroundStyle(muted)
@@ -488,7 +486,7 @@ struct Dashboard: View {
             Divider().opacity(0.5)
             Menu("공유 계정 전환") {
                 ForEach(model.presets) { preset in
-                    Button(preset.name) { pendingPreset = preset; switchTarget = "공유 인증"; showSwitch = true }
+                    Button(preset.displayName) { pendingPreset = preset; switchTarget = "공유 인증"; showSwitch = true }
                         .disabled(model.activeAccountID == preset.id)
                 }
             }.disabled(model.busy || model.refreshingUsage || model.presets.isEmpty)
@@ -507,30 +505,29 @@ struct Dashboard: View {
     }
     private var targets: some View {
         VStack(alignment: .leading, spacing: 13) {
-            sectionTitle("앱별 계정", detail: "현재 연결 계정을 확인하고, 앱별로 사용할 계정을 선택하세요")
             HStack(alignment: .top, spacing: 13) {
                 AppAccountCard(title: "ChatGPT", icon: "bubble.left.and.bubble.right",
                     installed: updates.products.first { $0.id == "chatgpt" }?.installed,
                     accounts: model.appAccounts.filter { $0.product == "chatgpt" },
                     presets: model.presets, busy: model.busy || model.refreshingUsage, canSwitch: false,
-                    switchExplanation: "앱 로그인 직접 조회·전환은 아직 연결되지 않았습니다. 아래 정보는 내부 Codex 저장소이며 앱 로그인 계정을 대신하지 않습니다. 공유 인증 변경은 저장한 계정의 고급 관리에서 가능합니다.",
+                    switchExplanation: "아래는 앱 로그인과 별개인 Codex 저장소 정보입니다.",
                     onAdd: { newAccountName = ""; showAdd = true })
                 AppAccountCard(title: "VS Code · Codex", icon: "chevron.left.forwardslash.chevron.right",
                     installed: updates.products.first { $0.id == "codex" }?.installed,
                     accounts: model.appAccounts.filter { $0.product == "codex" },
                     presets: model.presets, busy: model.busy || model.refreshingUsage, canSwitch: true,
-                    switchExplanation: "기존 VS Code와 별도의 계정으로 전용 창을 엽니다. 테마·로컬 대화 기록은 자동으로 연결합니다. 다른 계정으로 열기 전에는 전용 창을 종료해 주세요.",
+                    switchExplanation: "테마와 로컬 대화를 공유합니다. 계정 변경 전 전용 창을 종료하세요.",
                     onAdd: { newAccountName = ""; showAdd = true },
                     onOpenDedicated: { preset in pendingPreset = preset; showVSCode = true })
             }.fixedSize(horizontal: false, vertical: true)
-            Text("저장소의 계정 정보입니다. 실행 중 세션은 아직 직접 확인하지 못하므로, 실제 앱에 표시된 계정과 다를 수 있습니다.")
+            Text("저장소 기준입니다. 실제 로그인은 해당 앱에서 확인하세요.")
                 .font(.system(size: 11)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
         }
     }
     private var presetSection: some View {
         VStack(alignment: .leading, spacing: 13) {
             HStack {
-                sectionTitle("저장한 계정", detail: "현재 로그인은 자동 등록 · Codex 사용량 기준")
+                Text("\(model.presets.count)개 계정").font(.system(size: 13, weight: .semibold))
                 Spacer()
                 Button { Task { await model.refreshUsage() } } label: { Label(model.refreshingUsage ? "조회 중…" : "사용량 확인", systemImage: "chart.bar") }
                     .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.refreshingUsage || model.presets.isEmpty)
@@ -541,8 +538,8 @@ struct Dashboard: View {
                 HStack(spacing: 16) {
                     Image(systemName: "person.crop.rectangle.badge.plus").font(.system(size: 25)).foregroundStyle(muted)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("자주 쓰는 계정을 저장해 두세요").font(.system(size: 13, weight: .medium))
-                        Text("개인용, 업무용처럼 이름을 붙여 다음에 목록에서 선택할 수 있어요.")
+                        Text("저장한 계정 없음").font(.system(size: 13, weight: .medium))
+                        Text("계정 추가를 눌러 로그인하세요.")
                             .font(.system(size: 11)).foregroundStyle(muted)
                     }
                     Spacer()
@@ -555,10 +552,10 @@ struct Dashboard: View {
                         Image(systemName: "person.crop.circle.fill").font(.system(size: 28)).foregroundStyle(accent.opacity(0.7))
                         VStack(alignment: .leading, spacing: 5) {
                             HStack(spacing: 8) {
-                                Text(preset.name).font(.system(size: 13, weight: .medium))
+                                Text(preset.displayName).font(.system(size: 13, weight: .medium))
                                 if model.activeAccountID == preset.id { Text("공유 계정").font(.system(size: 9, weight: .semibold)).padding(.horizontal, 7).padding(.vertical, 4).background(DockTheme.blue.opacity(0.5), in: Capsule()) }
                             }
-                            Text(preset.email).font(.system(size: 11)).foregroundStyle(muted)
+                            Text(preset.planLabel).font(.system(size: 11)).foregroundStyle(muted)
                         }
                         Spacer()
                         Text(preset.savedAt, style: .date).font(.system(size: 10)).foregroundStyle(muted)
@@ -578,11 +575,8 @@ struct Dashboard: View {
     }
     private var footer: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("독립적으로 개발된 앱 · OpenAI 및 Anthropic의 공식 제품이 아닙니다.")
-            }
             Spacer()
-            if let date = model.lastChecked { Text(date, style: .time) }
+            if let date = model.lastChecked { Text("마지막 확인 · \(date.formatted(date: .omitted, time: .shortened))") }
         }.font(.system(size: 9)).foregroundStyle(muted).padding(.top, 3)
     }
     private func sectionTitle(_ title: String, detail: String) -> some View {
@@ -612,16 +606,16 @@ private struct AccountNameSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("계정 이름 지정").font(.title2.weight(.semibold))
-            Text("\(preset.email)의 이름을 지정하세요. 로그인 정보는 변경하지 않습니다.")
+            Text(preset.email)
                 .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
-            TextField("예: 개인용, 업무용", text: $name).textFieldStyle(.plain).padding(13)
+            TextField("이름 (선택)", text: $name).textFieldStyle(.plain).padding(13)
                 .background(.white, in: RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(DockTheme.navy.opacity(0.15)))
             HStack {
                 Spacer()
                 Button("취소") { dismiss() }.buttonStyle(DockButtonStyle())
                 Button("저장") { onSave(name) }.buttonStyle(DockButtonStyle(kind: .primary))
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
             }
         }.padding(28).frame(width: 420).background(DockTheme.canvas)
     }

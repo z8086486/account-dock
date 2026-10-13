@@ -25,6 +25,16 @@ def main():
         raise SystemExit('The local signing key does not match the public key embedded in the app.')
     feed = directory / f'appcast-{arch}.xml'
     with tempfile.TemporaryDirectory(prefix='account-dock-appcast-') as temp:
+        # Refuse an accidental ad-hoc release: it would re-prompt for Keychain access.
+        certificate = release.get('codeSigningCertificate')
+        if not certificate or len(certificate) != 40 or any(c not in '0123456789ABCDEF' for c in certificate):
+            raise SystemExit('Set the persistent release certificate fingerprint in release.json.')
+        unpacked = Path(temp) / 'validation'
+        subprocess.run(['/usr/bin/ditto', '-x', '-k', archive, unpacked], check=True)
+        requirement = f'=identifier "app.accountdock.mac" and certificate leaf = H"{certificate}"'
+        subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', '-R', requirement,
+                        unpacked / 'Account Dock.app'], check=True)
+        shutil.rmtree(unpacked)
         shutil.copy2(archive, Path(temp) / archive.name)
         subprocess.run([tools / 'generate_appcast', '--account', ACCOUNT,
             '--download-url-prefix', f'https://github.com/z8086486/account-dock/releases/download/v{version}/',

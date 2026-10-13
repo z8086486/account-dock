@@ -24,14 +24,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--configuration', choices=['debug', 'release'], default='release')
     parser.add_argument('--dmg', action='store_true')
+    parser.add_argument('--development', action='store_true', help='Ad-hoc development build without the release vault or updater')
     parser.add_argument('--install', action='store_true', help='Keep one current local installation')
+    parser.add_argument('--preview-signing-identity', help='Persistent local code signing identity for preview releases')
     parser.add_argument('--signing-identity')
     parser.add_argument('--notary-profile')
     parser.add_argument('--sparkle-public-key')
     args = parser.parse_args()
     release = json.loads(MANIFEST.read_text())
-    public_key = args.sparkle_public_key or release.get('updatePublicKey')
+    public_key = None if args.development else args.sparkle_public_key or release.get('updatePublicKey')
+    preview_identity = args.preview_signing_identity or release.get('codeSigningCertificate')
+    if args.development:
+        preview_identity = None
     signed = bool(args.signing_identity and args.notary_profile)
+    if args.preview_signing_identity and (args.signing_identity or args.notary_profile):
+        parser.error('Choose preview signing or Developer ID signing, not both.')
     if bool(args.signing_identity) != bool(args.notary_profile):
         parser.error('Developer ID packaging requires both signing identity and notary profile.')
     if public_key:
@@ -48,8 +55,15 @@ def main():
     destination.mkdir(parents=True)
     app = destination / 'Account Dock.app'
     contents = app / 'Contents'
-    for name in ['MacOS', 'Resources', 'Frameworks']:
+    for name in ['MacOS', 'Resources', 'Frameworks', 'Helpers']:
         (contents / name).mkdir(parents=True)
+    if not args.development:
+        vault = ROOT / '.local/vault/AccountDockVault'
+        if not vault.is_file() or hashlib.sha256(vault.read_bytes()).hexdigest() != release.get('vaultHelperSHA256'):
+            raise SystemExit('Restore the exact signed AccountDockVault from the previous release into .local/vault/. Do not rebuild it for UI updates.')
+        requirement = f'=identifier "app.accountdock.vault" and certificate leaf = H"{release["codeSigningCertificate"]}"'
+        run('codesign', '--verify', '--strict', '-R', requirement, vault)
+        shutil.copy2(vault, contents / 'Helpers/AccountDockVault')
     shutil.copy2(binary_dir / 'AccountDock', contents / 'MacOS/AccountDock')
     shutil.copytree(binary_dir / 'Sparkle.framework', contents / 'Frameworks/Sparkle.framework', symlinks=True)
     shutil.copy2(MANIFEST, contents / 'Resources/release.json')
@@ -66,7 +80,8 @@ def main():
             'CFBundleDisplayName': 'Account Dock', 'CFBundleExecutable': 'AccountDock',
             'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': release['version'],
             'CFBundleVersion': str(release['build']), 'LSMinimumSystemVersion': release['minimumMacOS'],
-            'NSHighResolutionCapable': True, 'CFBundleIconFile': 'AppIcon'}
+            'NSHighResolutionCapable': True, 'CFBundleIconFile': 'AppIcon',
+            'AccountDockDevelopmentBuild': args.development}
     if public_key:
         info.update({'SUFeedURL': FEED.format(architecture=platform.machine()), 'SUPublicEDKey': public_key,
                      'SUEnableAutomaticChecks': False, 'SUAutomaticallyUpdate': False,
@@ -86,7 +101,7 @@ def main():
         archive.unlink()
         run('xcrun', 'stapler', 'staple', app)
     else:
-        run('codesign', '--force', '--sign', '-', app)
+        run('codesign', '--force', '--sign', preview_identity or '-', app)
     run('codesign', '--verify', '--deep', '--strict', app)
     label = 'signed' if signed else 'preview'
     stem = f"AccountDock-{release['version']}-{platform.machine()}-{label}"

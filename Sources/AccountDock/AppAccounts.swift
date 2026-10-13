@@ -153,25 +153,26 @@ struct AppAccountCard: View {
             }
             if !canSwitch {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("앱 로그인 · 확인 필요").font(.system(size: 13, weight: .semibold))
+                    Text("앱 로그인 조회 미지원").font(.system(size: 13, weight: .semibold))
                     Text("\(switchExplanation)").font(.system(size: 11)).foregroundStyle(DockTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Text(canSwitch ? "현재 연결 계정" : "Codex 저장소 정보 · 참고용").font(.system(size: 11, weight: .semibold)).foregroundStyle(DockTheme.muted)
+            Text(canSwitch ? "현재 연결 계정" : "Codex 저장소").font(.system(size: 11, weight: .semibold)).foregroundStyle(DockTheme.muted)
             ForEach(displayedAccounts) { account in
                 VStack(alignment: .leading, spacing: 6) {
                     if account.product == "codex" {
-                        Text(account.home == VSCodeIsolation.home.path ? "전용 VS Code · 실험 기능" : "기존 VS Code")
+                        Text(account.home == VSCodeIsolation.home.path ? "전용 VS Code" : "기존 VS Code")
                             .font(.system(size: 10, weight: .semibold)).foregroundStyle(DockTheme.muted)
                     }
                     if let email = account.email {
-                        Text(email).font(.system(size: 13, weight: .medium)).textSelection(.enabled)
-                        Text([account.plan?.uppercased(), account.statusLabel].compactMap { $0 }.joined(separator: " · "))
+                        Text(AppAccountPresentation.displayName(email, presets: presets)).font(.system(size: 13, weight: .medium)).textSelection(.enabled)
+                        Text([AccountPreset.planLabel(account.plan), account.statusLabel].compactMap { $0 }.joined(separator: " · "))
                             .font(.system(size: 10)).foregroundStyle(DockTheme.muted)
                     } else { Text(account.statusLabel).font(.system(size: 12)).foregroundStyle(DockTheme.muted) }
                     DisclosureGroup("연결 정보") {
                         VStack(alignment: .leading, spacing: 5) {
+                            if let email = account.email { Text(email).textSelection(.enabled) }
                             if let version = account.version {
                                 Text("실행 중 확장 · \(version)")
                                 if let installed, version != installed { Text("설치 버전과 다름 · VS Code 재시작 후 확인").foregroundStyle(DockTheme.orange) }
@@ -203,8 +204,8 @@ struct AppAccountCard: View {
                             Image(systemName: selectedID == preset.id ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(selectedID == preset.id ? DockTheme.orange : DockTheme.muted)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(preset.name).font(.system(size: 12, weight: .medium))
-                                Text(preset.email).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                                Text(preset.displayName).font(.system(size: 12, weight: .medium))
+                                Text(preset.planLabel).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
                                     .lineLimit(1).truncationMode(.middle)
                             }
                             Spacer(minLength: 0)
@@ -213,12 +214,12 @@ struct AppAccountCard: View {
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(selectedID == preset.id ? DockTheme.orange.opacity(0.5) : Color.clear))
                             .contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(busy)
-                        .accessibilityLabel("\(title), \(preset.name), \(preset.email)")
+                        .accessibilityLabel("\(title), \(preset.displayName)")
                         .accessibilityAddTraits(selectedID == preset.id ? [.isSelected] : [])
                 }
                 Text(switchExplanation).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("선택한 계정으로 전용 창 열기") {
+                Button("전용 창 열기") {
                     if let selected {
                         onOpenDedicated?(selected)
                     }
@@ -234,6 +235,11 @@ struct AppAccountCard: View {
 
 /// Group connection rows by store and identity, retaining observed extension versions.
 enum AppAccountPresentation {
+    static func displayName(_ email: String, presets: [AccountPreset]) -> String {
+        let matches = presets.filter { $0.email.caseInsensitiveCompare(email) == .orderedSame }
+        return matches.count == 1 ? matches[0].displayName : email
+    }
+
     static func grouped(_ accounts: [AppIdentity]) -> [AppIdentity] {
         var result: [AppIdentity] = []
         for account in accounts {
