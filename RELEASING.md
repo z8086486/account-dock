@@ -1,5 +1,17 @@
 # Account Dock 배포와 버전 관리
 
+## 비용 없는 프리뷰 배포
+
+현재 경로는 Developer ID 없이 ad-hoc 서명한 APP/DMG를 GitHub **Pre-release**로 공개하는 방식입니다. 아래 정식 서명·공증 단계는 향후 선택 사항이며 무료 프리뷰를 막는 조건이 아닙니다.
+
+1. release.json의 버전과 build를 증가시키고 테스트합니다.
+2. `python3 scripts/package_app.py --dmg`로 ZIP·DMG·SHA256SUMS를 생성합니다.
+3. 검토한 코드 커밋에 숫자 버전 태그(예: v0.9.4)를 붙여 GitHub Pre-release를 만들고 세 파일을 첨부합니다.
+4. 공개 API의 릴리즈 목록과 다운로드 파일 해시를 확인합니다. 앱은 현재 CPU용 DMG가 있는 릴리즈만 표시합니다.
+5. 앱에서 최신 버전을 확인하고 브라우저로 다운로드합니다. 사용자가 기존 위치에 앱을 교체합니다. 자동 설치·공증·업데이트 간 Keychain 무재요청은 보장하지 않습니다.
+
+
+
 현재는 개발 프리뷰입니다. GitHub에는 소스 코드를 공개하며, 일반 사용자용 DMG/APP 릴리즈는 인증 연동과 배포 경로를 검증한 뒤 공개합니다. macOS 앱 바이너리는 GitHub Releases로 배포하고, GitHub Packages는 사용하지 않습니다.
 
 정식 배포 전 완료 조건은 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)를 확인하세요.

@@ -45,6 +45,23 @@ final class UpdateCenter: ObservableObject {
         }
     }
     func checkSelf() { controller?.checkForUpdates(nil) }
+    func downloadPreview() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            guard let release = try await VersionService.previewDownload() else {
+                message = "이 Mac용 설치 파일이 아직 공개되지 않았습니다."; return
+            }
+            guard !VersionService.newer(ReleaseConfiguration.current.version, release.version) else {
+                message = "설치된 앱이 공개된 프리뷰보다 최신입니다."; return
+            }
+            guard NSWorkspace.shared.open(release.download) else {
+                throw DockError.message("다운로드 링크를 열지 못했습니다.")
+            }
+            message = "v\(release.version) 다운로드를 브라우저에 요청했습니다. DMG를 열고 Account Dock을 종료한 뒤 기존 앱과 같은 위치에 교체하세요. 자동 설치는 하지 않습니다."
+        } catch { message = error.localizedDescription }
+    }
     func refresh(online: Bool = false, update: String? = nil) async {
         guard !busy else { return }
         busy = true
@@ -102,7 +119,7 @@ struct UpdatePanel: View {
                         VStack(alignment: .leading, spacing: 5) {
                             if product.id == "accountdock" {
                                 Text("GitHub Releases · Build \(ReleaseConfiguration.current.build)")
-                                Text(center.selfUpdateReady ? "서명 검증 후 앱 안에서 업데이트합니다." : "앱 내 설치는 서명된 첫 배포본부터 활성화됩니다.")
+                                Text(center.selfUpdateReady ? "서명 검증 후 앱 안에서 업데이트합니다." : "무료 프리뷰 · GitHub에서 다운로드 후 직접 교체합니다.")
                             } else {
                                 Text("확인한 버전: \(product.tested.joined(separator: ", "))")
                                 Text(product.scope)
@@ -111,8 +128,12 @@ struct UpdatePanel: View {
                         }.font(.system(size: 10)).foregroundStyle(DockTheme.muted)
                         Spacer()
                         if product.id == "accountdock" {
-                            Button("앱 업데이트") { center.checkSelf() }.buttonStyle(DockButtonStyle())
-                                .disabled(!center.selfUpdateReady || center.busy)
+                            if center.selfUpdateReady {
+                                Button("앱 업데이트") { center.checkSelf() }.buttonStyle(DockButtonStyle()).disabled(center.busy)
+                            } else {
+                                Button("프리뷰 다운로드") { Task { await center.downloadPreview() } }
+                                    .buttonStyle(DockButtonStyle()).disabled(center.busy)
+                            }
                         } else if product.id == "codex" {
                             Button("확장 업데이트") { pending = product; showConfirm = true }.buttonStyle(DockButtonStyle())
                                 .disabled(!product.update_available || center.busy)
@@ -123,6 +144,10 @@ struct UpdatePanel: View {
                     }
                 }.padding(22).background(.white, in: RoundedRectangle(cornerRadius: 16))
                     .overlay(RoundedRectangle(cornerRadius: 16).stroke(DockTheme.navy.opacity(0.09)))
+            }
+            if !center.selfUpdateReady {
+                Text("프리뷰는 Apple 공증을 받지 않았습니다. macOS 실행 확인과 업데이트 후 Keychain 접근 요청이 나타날 수 있습니다. 저장한 계정은 앱 외부의 Keychain에 유지됩니다.")
+                    .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
             }
             Text("ChatGPT 업데이트 설치는 공식 앱에서 진행합니다. 확장 버전은 기본 로컬 VS Code 설치 기준이며, 실행 중인 버전과 다를 수 있습니다.")
                 .font(.system(size: 11)).foregroundStyle(DockTheme.muted)

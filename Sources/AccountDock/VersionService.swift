@@ -43,13 +43,54 @@ enum VersionService {
         guard let latest = versions.max(by: { newer($1, $0) }) else { throw DockError.message("안정 버전을 찾지 못했습니다.") }
         return latest
     }
+    static var releaseAPI: URL { URL(string: "https://api.github.com/repos/z8086486/account-dock/releases?per_page=100")! }
+    static var architecture: String {
+        #if arch(arm64)
+        return "arm64"
+        #else
+        return "x86_64"
+        #endif
+    }
+    static func downloadableRelease(_ data: Data, architecture: String, includePreviews: Bool) throws -> (version: String, download: URL)? {
+        guard let releases = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw DockError.message("GitHub 릴리즈 응답을 확인하지 못했습니다.")
+        }
+        var candidates: [(version: String, download: URL)] = []
+        for release in releases {
+            guard release["draft"] as? Bool == false,
+                  includePreviews || release["prerelease"] as? Bool == false,
+                  let tag = release["tag_name"] as? String, numeric(tag) != nil else { continue }
+            let version = String(tag.drop(while: { $0 == "v" }))
+            for asset in release["assets"] as? [[String: Any]] ?? [] {
+                guard let name = asset["name"] as? String,
+                      ["AccountDock-\(version)-\(architecture)-preview.dmg", "AccountDock-\(version)-\(architecture)-signed.dmg"].contains(name),
+                      asset["state"] as? String == "uploaded",
+                      let raw = asset["browser_download_url"] as? String,
+                      let url = URL(string: raw), url.scheme == "https", url.host == "github.com",
+                      url.user == nil, url.password == nil, url.port == nil, url.query == nil, url.fragment == nil,
+                      url.path == "/z8086486/account-dock/releases/download/\(tag)/\(name)" else { continue }
+                candidates.append((version, url))
+            }
+        }
+        return candidates.max { newer($1.version, $0.version) }
+    }
+    static func previewDownload() async throws -> (version: String, download: URL)? {
+        var request = URLRequest(url: releaseAPI, timeoutInterval: 15)
+        request.setValue("AccountDock-version-check", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 16_000_000 else {
+            throw DockError.message("GitHub 다운로드 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.")
+        }
+        return try downloadableRelease(data, architecture: architecture, includePreviews: ReleaseConfiguration.current.channel == "preview")
+    }
     static func latest(_ product: String) async -> (String?, String) {
         do {
             let url: URL
             switch product {
             case "codex": url = URL(string: "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery")!
             case "chatgpt": url = URL(string: "https://updates.oaistatic.com/codex/app/appcast")!
-            default: url = URL(string: "https://api.github.com/repos/z8086486/account-dock/releases/latest")!
+            default: url = releaseAPI
             }
             var request = URLRequest(url: url, timeoutInterval: 15)
             request.setValue("AccountDock-version-check", forHTTPHeaderField: "User-Agent")
@@ -77,9 +118,9 @@ enum VersionService {
                 guard parser.parse(), let latest = delegate.versions.filter({ numeric($0) != nil }).max(by: { newer($1, $0) }) else { return (nil, "unavailable") }
                 value = latest
             } else {
-                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], json["draft"] as? Bool != true, json["prerelease"] as? Bool != true,
-                      let tag = json["tag_name"] as? String, numeric(tag) != nil else { return (nil, "unavailable") }
-                value = String(tag.drop(while: { $0 == "v" }))
+                guard let release = try downloadableRelease(data, architecture: architecture,
+                    includePreviews: ReleaseConfiguration.current.channel == "preview") else { return (nil, "not_released") }
+                value = release.version
             }
             return (value, "checked")
         } catch { return (nil, "unavailable") }

@@ -2,6 +2,22 @@ import XCTest
 @testable import AccountDock
 
 final class NativeTests: XCTestCase {
+    @MainActor func testPreviewReleaseSelectionRejectsDraftsAndForeignAssets() throws {
+        func release(_ version: String, draft: Bool = false, preview: Bool = true,
+                     arch: String = "arm64", host: String = "github.com") -> [String: Any] {
+            let name = "AccountDock-\(version)-\(arch)-preview.dmg"
+            return ["draft": draft, "prerelease": preview, "tag_name": "v" + version,
+                "assets": [["name": name, "state": "uploaded",
+                    "browser_download_url": "https://\(host)/z8086486/account-dock/releases/download/v\(version)/\(name)"]]]
+        }
+        let data = try JSONSerialization.data(withJSONObject: [release("1.0.0", preview: false),
+            release("1.1.0"), release("9.0.0", draft: true), release("8.0.0", arch: "x86_64"),
+            release("7.0.0", host: "example.com")])
+        XCTAssertEqual(try VersionService.downloadableRelease(data, architecture: "arm64", includePreviews: true)?.version, "1.1.0")
+        XCTAssertEqual(try VersionService.downloadableRelease(data, architecture: "arm64", includePreviews: false)?.version, "1.0.0")
+        XCTAssertNil(try VersionService.downloadableRelease(Data("[]".utf8), architecture: "arm64", includePreviews: true))
+        XCTAssertThrowsError(try VersionService.downloadableRelease(Data("{}".utf8), architecture: "arm64", includePreviews: true))
+    }
     func home() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

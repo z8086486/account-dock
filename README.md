@@ -44,7 +44,15 @@ ChatGPT 앱에는 개인 계정, VS Code 확장에는 업무 계정을 사용하
 - 소스 빌드에만 Swift 6.0 이상과 Xcode 또는 Command Line Tools 필요
 - 패키징·개발용 진단 도구에만 Python 3 사용. **0.6.0 앱 실행에는 Python이 필요하지 않습니다.**
 
-현재 진단 도구는 `~/.vscode/extensions`에서 확장에 포함된 Codex 실행 파일을 찾습니다. 다른 설치 경로는 CLI의 `--binary` 옵션으로 지정할 수 있습니다. 로컬 `.app`/`.dmg` 패키징을 지원합니다. 일반 사용자용 GitHub Release는 아직 공개하지 않았습니다.
+현재 진단 도구는 `~/.vscode/extensions`에서 확장에 포함된 Codex 실행 파일을 찾습니다. 다른 설치 경로는 CLI의 `--binary` 옵션으로 지정할 수 있습니다. 로컬 `.app`/`.dmg` 패키징을 지원합니다. Apple Silicon용 프리뷰를 [GitHub Releases](https://github.com/z8086486/account-dock/releases)에서 제공합니다. 정식 배포본은 아닙니다.
+
+## 무료 프리뷰 설치·업데이트
+
+[GitHub Releases](https://github.com/z8086486/account-dock/releases)에서 Apple Silicon용 DMG를 다운로드하세요. macOS 14 이상과 공식 Codex 실행 파일이 필요하며, Intel용 바이너리는 아직 제공하지 않습니다.
+
+앱의 **버전 · 업데이트 → 업데이트 확인 → 프리뷰 다운로드**에서도 새 버전을 확인하고 브라우저로 DMG를 내려받을 수 있습니다. Account Dock을 종료한 뒤 DMG 안의 앱을 기존 설치 위치에 교체하세요. 기존 설치가 `~/Applications`에 있다면 같은 위치를 사용해 중복 설치를 피하세요. 저장 계정은 Keychain에 유지됩니다.
+
+이 방식은 유료 개발자 등록 없이 제공하는 ad-hoc 서명 프리뷰입니다. Apple 공증·자동 앱 교체는 제공하지 않습니다. macOS 실행 확인과 Keychain 접근 요청이 발생할 수 있으며, 보안 설정을 자동으로 변경하지 않습니다. 릴리즈에 SHA256SUMS를 함께 제공합니다.
 
 ## 시작하기
 
