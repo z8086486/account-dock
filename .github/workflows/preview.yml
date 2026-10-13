@@ -1,0 +1,28 @@
+name: Build macOS preview
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test Swift
+        run: swift test
+      - name: Test Python
+        run: python3 -m unittest discover -s tests -v
+      - name: Package preview (no public release)
+        run: python3 scripts/package_app.py --dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AccountDock-macOS-preview
+          path: |
+            dist/**/*.zip
+            dist/**/*.dmg
+            dist/**/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14

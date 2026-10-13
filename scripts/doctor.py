@@ -10,6 +10,16 @@ import time
 import signal
 
 
+def client_version():
+    here = Path(__file__).resolve().parent
+    for path in [here / 'release.json', here.parent / 'Sources/AccountDock/Resources/release.json']:
+        try:
+            return json.loads(path.read_text())['version']
+        except (OSError, ValueError, KeyError):
+            pass
+    return 'development'
+
+
 def discover():
     candidates = list((Path.home() / '.vscode/extensions').glob('openai.chatgpt-*/bin/macos-*/codex'))
     return max(candidates, key=lambda p: p.stat().st_mtime) if candidates else None
@@ -47,7 +57,7 @@ def read_account(binary, codex_home, show_email=False, timeout=12, action="statu
 
         try:
             send({'id': 1, 'method': 'initialize', 'params': {
-                'clientInfo': {'name': 'account_dock', 'version': '0.1.0'}}})
+                'clientInfo': {'name': 'account_dock', 'version': client_version()}}})
             deadline = time.monotonic() + timeout
             buffer = b''
             while time.monotonic() < deadline:

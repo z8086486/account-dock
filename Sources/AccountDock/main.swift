@@ -2,10 +2,14 @@ import SwiftUI
 
 @main
 struct AccountDockApp: App {
+    @StateObject private var updates = UpdateCenter()
     var body: some Scene {
-        WindowGroup("Account Dock") { Dashboard() }
+        WindowGroup("Account Dock") { Dashboard().environmentObject(updates) }
             .windowStyle(.hiddenTitleBar)
-            .defaultSize(width: 1040, height: 760)
+            .defaultSize(width: 1120, height: 850)
+            .commands { CommandGroup(after: .appInfo) {
+                Button("Account Dock 업데이트 확인…") { updates.checkSelf() }.disabled(!updates.selfUpdateReady)
+            } }
     }
 }
 
@@ -124,6 +128,7 @@ final class DockModel: ObservableObject {
 
 struct Dashboard: View {
     @StateObject private var model = DockModel()
+    @EnvironmentObject private var updates: UpdateCenter
     @State private var selection = "accounts"
     @State private var showSave = false
     @State private var presetName = ""
@@ -132,9 +137,9 @@ struct Dashboard: View {
     @State private var showSwitch = false
     @State private var showDelete = false
     @State private var pendingDelete: AccountPreset?
-    private let ink = Color(red: 0.12, green: 0.14, blue: 0.13)
-    private let muted = Color(red: 0.44, green: 0.46, blue: 0.44)
-    private let accent = Color(red: 0.18, green: 0.39, blue: 0.32)
+    private let ink = DockTheme.navy
+    private let muted = DockTheme.muted
+    private let accent = DockTheme.orange
 
     var body: some View {
         HStack(spacing: 0) {
@@ -155,14 +160,14 @@ struct Dashboard: View {
                         overview
                         targets
                         presetSection
-                    } else { presetSection }
+                    } else if selection == "updates" { UpdatePanel(center: updates) } else { presetSection }
                     footer
                 }.padding(32)
-            }.background(Color(red: 0.985, green: 0.983, blue: 0.972))
+            }.background(DockTheme.canvas)
         }
         .foregroundStyle(ink).tint(accent).preferredColorScheme(.light)
-        .frame(minWidth: 940, minHeight: 700)
-        .task { model.loadPresets(); await model.request() }
+        .frame(minWidth: 1020, minHeight: 780)
+        .task { model.loadPresets(); await model.request(); await updates.refresh() }
         .sheet(isPresented: $showSave) { saveSheet }
         .alert("공유 저장소에서 로그아웃할까요?", isPresented: $showLogout) {
             Button("취소", role: .cancel) {}
@@ -181,22 +186,26 @@ struct Dashboard: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "rectangle.stack.fill").font(.system(size: 21)).foregroundStyle(accent)
+                Text("AD").font(.system(size: 15, weight: .black, design: .rounded)).foregroundStyle(ink)
+                    .frame(width: 36, height: 36).background(DockTheme.orange, in: RoundedRectangle(cornerRadius: 10))
                 Text("Account Dock").font(.system(size: 16, weight: .semibold))
             }.padding(.top, 40).padding(.bottom, 42)
-            Text("WORKSPACE").font(.system(size: 9, weight: .semibold)).tracking(2).foregroundStyle(muted).padding(.bottom, 14)
+            Text("CONTROL PANEL").font(.system(size: 9, weight: .semibold)).tracking(2).foregroundStyle(DockTheme.blue.opacity(0.75)).padding(.bottom, 14)
             nav("계정 관리", icon: "square.grid.2x2", id: "accounts")
             nav("저장한 프리셋", icon: "person.crop.rectangle.stack", id: "presets")
+            nav("버전 · 업데이트", icon: "arrow.down.circle", id: "updates")
             Spacer()
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 6) { Circle().fill(accent).frame(width: 5, height: 5); Text("ON THIS MAC").tracking(1.5) }
                     .font(.system(size: 9, weight: .semibold))
-                Text("계정은 가까이,\n전환은 간단하게.").font(.system(size: 13)).lineSpacing(5).foregroundStyle(muted)
+                Text("계정은 가까이,\n전환은 간단하게.").font(.system(size: 13)).lineSpacing(5).foregroundStyle(DockTheme.blue.opacity(0.75))
             }.padding(.bottom, 28)
             Divider()
-            Text("Account Dock · Preview").font(.system(size: 10)).foregroundStyle(muted).padding(.vertical, 20)
-        }.padding(.horizontal, 22).frame(width: 195)
-            .background(Color(red: 0.94, green: 0.94, blue: 0.925))
+            Text("v\(ReleaseConfiguration.current.version) · PREVIEW").font(.system(size: 10)).foregroundStyle(DockTheme.blue.opacity(0.75)).padding(.vertical, 20)
+        }.padding(.horizontal, 22).frame(width: 210)
+            .foregroundStyle(DockTheme.blue)
+            .background(DockTheme.navy)
+            .overlay(alignment: .trailing) { Rectangle().fill(DockTheme.orange).frame(width: 4) }
     }
     private func nav(_ title: String, icon: String, id: String) -> some View {
         Button { selection = id } label: {
@@ -204,23 +213,26 @@ struct Dashboard: View {
                 Image(systemName: icon).frame(width: 18)
                 Text(title).font(.system(size: 12, weight: selection == id ? .semibold : .regular))
                 Spacer()
-            }.padding(12).background(selection == id ? Color.white : Color.clear, in: RoundedRectangle(cornerRadius: 9))
+            }.padding(12).foregroundStyle(selection == id ? ink : DockTheme.blue)
+                .background(selection == id ? DockTheme.blue : Color.clear, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(alignment: .leading) { if selection == id { RoundedRectangle(cornerRadius: 2).fill(accent).frame(width: 3, height: 18) } }
         }.buttonStyle(.plain).padding(.bottom, 5)
     }
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 9) {
-                Text("YOUR ACCOUNTS, ONE PLACE").font(.system(size: 9, weight: .medium)).tracking(2.5).foregroundStyle(muted)
-                Text(selection == "accounts" ? "내 계정, 한눈에." : "다음에도, 이 계정으로.")
+                Text("ACCOUNT DOCK  /  CONTROL SERIES").font(.system(size: 9, weight: .medium)).tracking(2.5).foregroundStyle(muted)
+                Text(selection == "accounts" ? "내 계정, 한눈에." : selection == "updates" ? "버전과 업데이트." : "다음에도, 이 계정으로.")
                     .font(.system(size: 29, weight: .semibold))
-                Text(selection == "accounts" ? "연결 상태를 확인하고 저장한 계정으로 전환하세요." : "이 Mac에 저장한 계정을 관리하세요.")
+                Text(selection == "accounts" ? "연결 상태를 확인하고 저장한 계정으로 전환하세요." : selection == "updates" ? "설치부터 다음 업데이트까지, 한곳에서." : "이 Mac에 저장한 계정을 관리하세요.")
                     .font(.system(size: 12)).foregroundStyle(muted)
             }
             Spacer()
-            Button { Task { await model.request() } } label: {
+            DockStripes().frame(height: 62).padding(.trailing, 12)
+            Button { Task { await model.request(); await updates.refresh() } } label: {
                 Label(model.busy ? "확인 중" : "새로고침", systemImage: "arrow.clockwise")
                     .font(.system(size: 11, weight: .medium)).padding(.horizontal, 4).padding(.vertical, 3)
-            }.buttonStyle(.bordered).disabled(model.busy)
+            }.buttonStyle(DockButtonStyle()).disabled(model.busy)
         }
     }
     private var overview: some View {
@@ -228,12 +240,12 @@ struct Dashboard: View {
             HStack {
                 Label("OpenAI · 공유 계정", systemImage: "person.crop.circle").font(.system(size: 12, weight: .medium))
                 Spacer()
-                badge(model.connected ? "저장된 로그인" : model.report?.codex.status == "signed_out" ? "로그아웃" : "확인 필요", green: model.connected)
+                badge(model.connected ? "CONNECTED · 로컬 계정" : model.report?.codex.status == "signed_out" ? "로그아웃" : "확인 필요", green: model.connected)
             }
             HStack(spacing: 15) {
                 Text(model.connected ? String((model.report?.codex.email ?? "A").prefix(1)).uppercased() : "—")
                     .font(.system(size: 23, weight: .medium)).frame(width: 54, height: 54)
-                    .background(Color(red: 0.90, green: 0.93, blue: 0.90), in: RoundedRectangle(cornerRadius: 17))
+                    .background(DockTheme.blue, in: RoundedRectangle(cornerRadius: 17))
                 VStack(alignment: .leading, spacing: 6) {
                     Text(model.report?.codex.email ?? (model.busy ? "계정을 확인하고 있어요" : model.report?.codex.status == "signed_out" ? "연결된 계정 없음" : "계정 확인 필요"))
                         .font(.system(size: 18, weight: .medium)).textSelection(.enabled)
@@ -247,10 +259,10 @@ struct Dashboard: View {
                     .font(.system(size: 11)).foregroundStyle(muted)
                 Spacer()
                 if model.connected {
-                    Button("로그아웃") { showLogout = true }.buttonStyle(.borderless).foregroundStyle(muted).disabled(model.busy)
+                    Button("로그아웃") { showLogout = true }.buttonStyle(DockButtonStyle(kind: .quiet)).foregroundStyle(muted).disabled(model.busy)
                 }
                 Button(model.connected ? "다른 계정 로그인" : "로그인") { Task { await model.request("login") } }
-                    .buttonStyle(.borderedProminent).disabled(model.busy)
+                    .buttonStyle(DockButtonStyle(kind: .primary)).disabled(model.busy)
             }
         }.padding(24).background(.white, in: RoundedRectangle(cornerRadius: 18))
             .overlay(RoundedRectangle(cornerRadius: 18).stroke(ink.opacity(0.07)))
@@ -259,8 +271,8 @@ struct Dashboard: View {
         VStack(alignment: .leading, spacing: 13) {
             sectionTitle("사용 환경", detail: "앱별 실제 계정은 아직 대조 전입니다")
             HStack(spacing: 13) {
-                target("ChatGPT", subtitle: "macOS 앱", icon: "bubble.left.and.bubble.right")
-                target("VS Code", subtitle: "Codex 확장", icon: "chevron.left.forwardslash.chevron.right")
+                target("ChatGPT", subtitle: "macOS · " + (updates.products.first { $0.id == "chatgpt" }?.installed ?? "미확인"), icon: "bubble.left.and.bubble.right")
+                target("VS Code", subtitle: "Codex · " + (updates.products.first { $0.id == "codex" }?.installed ?? "미확인"), icon: "chevron.left.forwardslash.chevron.right")
             }
         }
     }
@@ -286,7 +298,7 @@ struct Dashboard: View {
                 sectionTitle("계정 프리셋", detail: "Keychain에 안전하게 보관")
                 Spacer()
                 Button { presetName = ""; showSave = true } label: { Label("현재 계정 저장", systemImage: "plus") }
-                    .font(.system(size: 11)).buttonStyle(.borderless)
+                    .font(.system(size: 11)).buttonStyle(DockButtonStyle(kind: .quiet))
                     .disabled(!model.connected || !model.supportsPresets || model.busy)
             }
             if model.presets.isEmpty {
@@ -310,9 +322,9 @@ struct Dashboard: View {
                         }
                         Spacer()
                         Text(preset.savedAt, style: .date).font(.system(size: 10)).foregroundStyle(muted)
-                        Button("선택") { pendingPreset = preset; showSwitch = true }.buttonStyle(.bordered).disabled(model.busy)
-                        Menu { Button("프리셋 삭제", role: .destructive) { pendingDelete = preset; showDelete = true } } label: { Image(systemName: "ellipsis") }
-                            .menuStyle(.borderlessButton).frame(width: 20).disabled(model.busy)
+                        Button("선택") { pendingPreset = preset; showSwitch = true }.buttonStyle(DockButtonStyle()).disabled(model.busy)
+                        Button { pendingDelete = preset; showDelete = true } label: { Image(systemName: "trash").accessibilityLabel("프리셋 삭제") }
+                            .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.busy)
                     }.padding(16).background(.white, in: RoundedRectangle(cornerRadius: 12))
                 }
             }
@@ -335,23 +347,24 @@ struct Dashboard: View {
         }
     }
     private func badge(_ title: String, green: Bool) -> some View {
-        HStack(spacing: 5) { Circle().fill(green ? accent : muted).frame(width: 5, height: 5); Text(title) }
-            .font(.system(size: 10)).foregroundStyle(green ? accent : muted)
-            .padding(.horizontal, 9).padding(.vertical, 5).background((green ? accent : muted).opacity(0.08), in: Capsule())
+        HStack(spacing: 5) { Circle().fill(green ? ink : muted).frame(width: 5, height: 5); Text(title) }
+            .font(.system(size: 10)).foregroundStyle(green ? ink : muted)
+            .padding(.horizontal, 9).padding(.vertical, 5).background((green ? ink : muted).opacity(0.08), in: Capsule())
     }
     private var saveSheet: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("계정 프리셋 저장").font(.title2.weight(.semibold))
             Text("현재 계정의 인증 정보를 이 Mac의 Keychain에 저장합니다. 만료되거나 취소된 인증은 다시 로그인해야 합니다.")
                 .font(.system(size: 12)).foregroundStyle(muted)
-            TextField("예: 개인용, 업무용", text: $presetName).textFieldStyle(.roundedBorder)
+            TextField("예: 개인용, 업무용", text: $presetName).textFieldStyle(.plain).padding(13).background(.white, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(ink.opacity(0.15)))
             HStack {
                 Spacer()
-                Button("취소") { showSave = false }
+                Button("취소") { showSave = false }.buttonStyle(DockButtonStyle())
                 Button("저장") { let name = presetName; showSave = false; Task { await model.savePreset(name: name) } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(DockButtonStyle(kind: .primary))
                     .disabled(presetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-        }.padding(28).frame(width: 390)
+        }.padding(28).frame(width: 420).background(DockTheme.canvas)
     }
 }

@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "version": "0.3.0",
+  "build": 3,
+  "channel": "preview",
+  "minimumMacOS": "14.0",
+  "repository": "z8086486/account-dock",
+  "compatibility": {
+    "chatgpt": {
+      "versions": ["26.1007.30912"],
+      "scope": "설치 감지 확인 · 앱별 인증은 미검증"
+    },
+    "codex": {
+      "versions": ["26.1007.21434"],
+      "scope": "공유 저장소 계정 조회 확인 · 독립 전환은 미검증"
+    }
+  }
+}

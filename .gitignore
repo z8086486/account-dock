@@ -50,3 +50,21 @@ __pycache__/
 !/tests/AccountDockTests/
 /tests/AccountDockTests/*
 !/tests/AccountDockTests/PresetTests.swift
+
+# Reviewed design, versioning, and packaging files.
+!/Package.resolved
+!/RELEASING.md
+!/Sources/AccountDock/Theme.swift
+!/Sources/AccountDock/Updates.swift
+!/Sources/AccountDock/Resources/
+/Sources/AccountDock/Resources/*
+!/Sources/AccountDock/Resources/release.json
+!/scripts/versions.py
+!/scripts/package_app.py
+!/tests/test_versions.py
+!/tests/AccountDockTests/VersionTests.swift
+!/.github/
+/.github/*
+!/.github/workflows/
+/.github/workflows/*
+!/.github/workflows/preview.yml
