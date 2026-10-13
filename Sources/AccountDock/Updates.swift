@@ -58,25 +58,7 @@ final class UpdateCenter: ObservableObject {
         } catch { message = "버전 정보를 확인하거나 업데이트하지 못했습니다. 네트워크와 VS Code 설치 상태를 확인해 주세요." }
     }
     private func run(online: Bool, update: String?) async throws -> VersionReport {
-        let script: String?
-        if CommandLine.arguments.count > 1 {
-            script = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent().appendingPathComponent("versions.py").path
-        } else { script = Bundle.main.path(forResource: "versions", ofType: "py") }
-        guard let script else { throw DockError.message("Version tool missing") }
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        var arguments = ["python3", "-B", script, "--manifest", ReleaseConfiguration.url.path]
-        if online { arguments.append("--online") }
-        if let update { arguments += ["--update-codex", update] }
-        task.arguments = arguments
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
-        try task.run()
-        let data = await Task.detached { pipe.fileHandleForReading.readDataToEndOfFile() }.value
-        task.waitUntilExit()
-        guard task.terminationStatus == 0 else { throw DockError.message("Version tool failed") }
-        return try JSONDecoder().decode(VersionReport.self, from: data)
+        try await VersionService.inventory(online: online, update: update)
     }
 }
 

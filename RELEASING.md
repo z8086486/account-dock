@@ -8,7 +8,7 @@
 
 `Sources/AccountDock/Resources/release.json`을 버전 정보의 원본으로 사용합니다.
 
-- `version`: Account Dock의 SemVer 버전. 현재 `0.5.0`.
+- `version`: Account Dock의 SemVer 버전. 현재 `0.6.0`.
 - `build`: 배포 후보마다 증가하는 정수. Sparkle의 업데이트 비교에 사용하는 `CFBundleVersion`으로 전달됩니다. 같은 빌드 번호를 재사용하지 않습니다.
 - `channel`: 현재 `preview`. 공개 안정판은 출시 검증 후 변경합니다.
 - `minimumMacOS`: 지원 macOS 하한.
@@ -40,9 +40,9 @@ python3 scripts/package_app.py --dmg
 - `AccountDock-<version>-<architecture>-preview.dmg`
 - `SHA256SUMS`
 
-앱에는 Sparkle 프레임워크, 설정 리소스와 진단 스크립트만 포함합니다. 사용자 계정, 인증 파일, 저장한 계정, 작업 기록은 포함하지 않습니다. 빌드한 Mac의 아키텍처용으로 생성하며 현재 universal 배포가 아닙니다.
+앱에는 Sparkle 프레임워크와 설정 리소스만 포함합니다. 사용자 계정, 인증 파일, 저장한 계정, 작업 기록은 포함하지 않습니다. 빌드한 Mac의 아키텍처용으로 생성하며 현재 universal 배포가 아닙니다.
 
-프리뷰는 로컬 실행을 위한 ad-hoc 서명입니다. Developer ID 서명·공증을 받은 정식 배포본이 아니며, 앱 자체 업데이트도 비활성화됩니다. **현재는 실행 대상 Mac에도 Python 3와 공식 Codex 확장이 필요합니다.** Python 의존성 제거 또는 런타임 배포 전략을 해결하기 전에는 일반 사용자용 독립 실행 앱으로 홍보하지 않습니다.
+프리뷰는 로컬 실행을 위한 ad-hoc 서명입니다. Developer ID 서명·공증을 받은 정식 배포본이 아니며, 앱 자체 업데이트도 비활성화됩니다. **0.6.0부터 실행 대상 Mac에는 Python이 필요하지 않습니다.** 공식 ChatGPT 앱 또는 Codex 확장에 포함된 실행 파일은 필요합니다. Python·Xcode 없는 깨끗한 Mac 설치는 별도 검증해야 합니다.
 
 동일한 버전의 출력 폴더가 이미 있으면 덮어쓰지 않고 중단합니다. 이전 산출물을 다른 위치로 보관한 뒤 다시 빌드하세요.
 
@@ -59,7 +59,7 @@ Account Dock에는 Sparkle 2.10.0이 연결되어 있습니다. 앱 번들에 HT
 - Apple Developer ID Application 인증서와 서명용 Keychain
 - `notarytool`에서 사용할 공증 자격 증명 프로필
 - Sparkle `generate_keys`로 만든 Ed25519 서명 키. 개인 키는 Keychain에 유지하고 공개 키만 앱에 포함합니다.
-- Python 의존성 해결 및 실제 두 계정 전환 검증
+- 깨끗한 Mac 설치 및 실제 두 계정 전환 검증
 
 키를 준비한 뒤의 빌드 명령 형태:
 
@@ -100,3 +100,21 @@ https://github.com/z8086486/account-dock/releases/latest/download/appcast.xml
 
 - [Sparkle 배포 및 업데이트 문서](https://sparkle-project.org/documentation/)
 - [VS Code 공식 CLI](https://code.visualstudio.com/docs/configure/command-line)
+
+## 로컬 설치 하나만 유지
+
+```sh
+python3 scripts/package_app.py --dmg --install
+```
+
+`~/Applications/Account Dock.app`을 고정 경로로 사용합니다. 새 번들의 서명을 검증하고 기존 Account Dock 프로세스만 종료한 뒤 앱을 교체합니다. 교체 검증이 실패하면 이전 설치를 복원합니다. 이전 빌드보다 낮은 빌드는 설치하지 않습니다. 확인된 `/Applications/Account Dock.app`과 이 프로젝트 `.local/`, `dist/`의 과거 앱 번들은 정리하고 ZIP/DMG는 유지합니다. 로그인 파일, Keychain, 앱 설정은 삭제하지 않습니다. 임의로 복사한 다른 경로까지 검색·삭제하지는 않습니다.
+
+## 서명 준비 확인
+
+```sh
+python3 scripts/release_preflight.py --app "$HOME/Applications/Account Dock.app"
+```
+
+인증서 이름이나 인증 토큰을 출력하지 않고 Developer ID 존재 여부, 실제 서명, Gatekeeper, 공증 티켓과 업데이트 설정을 검사합니다. 성공하더라도 실제 두 계정·깨끗한 Mac·업데이트 검증을 대신하지 않습니다.
+
+유효한 인증서가 없다는 결과만으로 Developer Program 미가입이라고 판단할 수 없습니다. [Apple Developer 계정](https://developer.apple.com/account/)에 로그인해 Membership details에서 가입 상태와 팀을 확인한 후 [Developer ID 인증서 안내](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/)에 따라 준비합니다. 비밀번호·인증서 개인 키는 소스나 작업 기록에 남기지 않습니다.

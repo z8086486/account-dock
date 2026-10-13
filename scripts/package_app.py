@@ -24,6 +24,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--configuration', choices=['debug', 'release'], default='release')
     parser.add_argument('--dmg', action='store_true')
+    parser.add_argument('--install', action='store_true', help='Keep one current local installation')
     parser.add_argument('--signing-identity')
     parser.add_argument('--notary-profile')
     parser.add_argument('--sparkle-public-key')
@@ -50,8 +51,6 @@ def main():
         (contents / name).mkdir(parents=True)
     shutil.copy2(binary_dir / 'AccountDock', contents / 'MacOS/AccountDock')
     shutil.copytree(binary_dir / 'Sparkle.framework', contents / 'Frameworks/Sparkle.framework', symlinks=True)
-    for script in ['doctor.py', 'versions.py', 'usage.py', 'app_accounts.py']:
-        shutil.copy2(ROOT / 'scripts' / script, contents / 'Resources' / script)
     shutil.copy2(MANIFEST, contents / 'Resources/release.json')
     for asset in ['AppIcon.icns', 'AccountDock.png']:
         shutil.copy2(MANIFEST.parent / asset, contents / 'Resources' / asset)
@@ -107,7 +106,10 @@ def main():
         artifacts.append(dmg)
     (destination / 'SHA256SUMS').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + p.name + '\n' for p in artifacts))
     print(f'Built {label} artifacts: {destination}')
-    print('No GitHub Release was created. Python 3 and the Codex extension are still runtime requirements.')
+    print('No GitHub Release was created. Runtime requires an installed official Codex binary; no Python required.')
+    if args.install:
+        from install_local import install
+        install(app)
 
 
 if __name__ == '__main__':

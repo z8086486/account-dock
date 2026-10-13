@@ -1,4 +1,5 @@
 import SwiftUI
+import Darwin
 
 struct AppIdentity: Decodable, Identifiable {
     let id: String
@@ -25,25 +26,96 @@ struct AppIdentityReport: Decodable {
     let checkedAt: Double
 }
 
+@MainActor
 enum AppIdentityReader {
+    static let desktop = "/Applications/ChatGPT.app/Contents/"
+    static let editor = "/Applications/Visual Studio Code.app/Contents/"
     static func read() async throws -> AppIdentityReport {
-        let script: String?
-        if CommandLine.arguments.count > 1 {
-            script = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent().appendingPathComponent("app_accounts.py").path
-        } else { script = Bundle.main.path(forResource: "app_accounts", ofType: "py") }
-        guard let script else { throw DockError.message("앱별 계정 조회 도구가 없습니다.") }
-        return try await Task.detached {
-            let process = Process(), output = Pipe()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["python3", "-B", script, "--show-email"]
-            process.standardOutput = output
-            process.standardError = FileHandle.nullDevice
-            try process.run()
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { throw DockError.message("앱별 계정 조회에 실패했습니다.") }
-            return try JSONDecoder().decode(AppIdentityReport.self, from: data)
-        }.value
+        let process = Process(), output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-axo", "pid=,ppid=,comm="]
+        process.standardOutput = output; process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw DockError.message("앱 실행 정보를 확인하지 못했습니다.") }
+        let rows = ActivityGate.processRows(String(decoding: data, as: UTF8.self))
+        let table = Dictionary(uniqueKeysWithValues: rows.map { ($0.pid, $0) })
+        var accounts: [AppIdentity] = [], seen = Set<String>()
+        for row in rows {
+            let parent = table[row.parent]?.path ?? ""
+            let product: String
+            if row.path.hasPrefix(desktop), URL(fileURLWithPath: row.path).lastPathComponent == "codex", parent == desktop + "MacOS/ChatGPT" { product = "chatgpt" }
+            else if row.path.contains("/.vscode/extensions/openai.chatgpt-"), row.path.hasSuffix("/codex"), parent.hasPrefix(editor), parent.contains("Code Helper (Plugin)") { product = "codex" }
+            else { continue }
+            var home: String?, version: String?, email: String?, plan: String?, status = "unavailable"
+            do {
+                let (args, environment) = try arguments(row.pid)
+                guard args.contains("app-server") else { continue }
+                guard !args.contains(where: { $0 == "--profile" || $0 == "-p" || $0.hasPrefix("--profile=") || $0.contains("cli_auth_credentials_store") }) else { throw DockError.message("인증 설정 재정의") }
+                guard let path = environment["CODEX_HOME"] ?? environment["HOME"].map({ $0 + "/.codex" }), path.hasPrefix("/") else { throw DockError.message("인증 경로 미확인") }
+                home = URL(fileURLWithPath: path).standardizedFileURL.path
+                let identity = try storedIdentity(home!)
+                status = identity.status; email = identity.email; plan = identity.plan
+                if product == "codex", let component = row.path.split(separator: "/").first(where: { $0.hasPrefix("openai.chatgpt-") }) {
+                    version = String(component.dropFirst("openai.chatgpt-".count).split(separator: "-").first ?? "")
+                }
+            } catch { }
+            let key = [product, home ?? "", version ?? "", status].joined(separator: "|")
+            if seen.insert(key).inserted { accounts.append(AppIdentity(id: key, product: product, status: status, email: email, plan: plan, home: home, version: version)) }
+        }
+        for product in ["chatgpt", "codex"] where !accounts.contains(where: { $0.product == product }) {
+            let root = product == "chatgpt" ? desktop + "MacOS/ChatGPT" : editor + "MacOS/Code"
+            accounts.append(AppIdentity(id: product, product: product, status: rows.contains(where: { $0.path == root }) ? "process_unavailable" : "not_running", email: nil, plan: nil, home: nil, version: nil))
+        }
+        return AppIdentityReport(accounts: accounts, checkedAt: Date().timeIntervalSince1970)
+    }
+    static func storedIdentity(_ home: String) throws -> (status: String, email: String?, plan: String?) {
+        let base = URL(fileURLWithPath: home)
+        let configURL = base.appendingPathComponent("config.toml")
+        // Conservatively refuse explicit auth-store configuration; do not approximate a TOML parser.
+        if FileManager.default.fileExists(atPath: configURL.path) {
+            let config = try String(contentsOf: configURL, encoding: .utf8)
+            if config.contains("cli_auth_credentials_store") { return ("unsupported_store", nil, nil) }
+        }
+        guard let data = try AuthTransaction.snapshot(base.appendingPathComponent("auth.json")) else { return ("no_saved_auth", nil, nil) }
+        guard data.count <= 1_000_000, let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ("unavailable", nil, nil) }
+        guard let tokens = json["tokens"] as? [String: Any], let token = tokens["id_token"] as? String else { return (json["OPENAI_API_KEY"] is String ? "api_key" : "no_saved_auth", nil, nil) }
+        let claims = CodexService.claims(token)
+        guard let email = claims["email"] as? String else { return ("unavailable", nil, nil) }
+        return ("stored_account", email, (claims["https://api.openai.com/auth"] as? [String: Any])?["chatgpt_plan_type"] as? String)
+    }
+    static func arguments(_ pid: Int32) throws -> ([String], [String: String]) {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var data = [UInt8](repeating: 0, count: 1_048_576), size = 1_048_576
+        guard sysctl(&mib, 3, &data, &size, nil, 0) == 0 else { throw DockError.message("프로세스 정보 접근 불가") }
+        return try parseArguments(Data(data.prefix(size)))
+    }
+    static func parseArguments(_ data: Data) throws -> ([String], [String: String]) {
+        guard data.count >= 5 else { throw DockError.message("프로세스 응답 오류") }
+        let argc = data.withUnsafeBytes { Int($0.loadUnaligned(as: Int32.self)) }
+        guard argc > 0 && argc < 4096 else { throw DockError.message("프로세스 응답 오류") }
+        let bytes = [UInt8](data)
+        var index = 4
+        while index < bytes.count && bytes[index] != 0 { index += 1 }
+        while index < bytes.count && bytes[index] == 0 { index += 1 }
+        func next() throws -> String {
+            let start = index
+            while index < bytes.count && bytes[index] != 0 { index += 1 }
+            guard index < bytes.count else { throw DockError.message("프로세스 응답 오류") }
+            defer { index += 1 }
+            return String(decoding: bytes[start..<index], as: UTF8.self)
+        }
+        var args: [String] = []
+        for _ in 0..<argc { args.append(try next()) }
+        var environment: [String: String] = [:]
+        while index < bytes.count {
+            let text = try next()
+            if let separator = text.firstIndex(of: "=") {
+                let key = String(text[..<separator])
+                if ["HOME", "CODEX_HOME"].contains(key) { environment[key] = String(text[text.index(after: separator)...]) }
+            }
+        }
+        return (args, environment)
     }
 }
 

@@ -38,28 +38,81 @@ struct UsageReport: Decodable {
     let checkedAt: Double?
 }
 
+@MainActor
 enum UsageReader {
     static func read(_ credential: Data) async throws -> UsageReport {
-        let script: String?
-        if CommandLine.arguments.count > 1 {
-            script = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent().appendingPathComponent("usage.py").path
-        } else { script = Bundle.main.path(forResource: "usage", ofType: "py") }
-        guard let script else { throw DockError.message("사용량 조회 도구가 없습니다.") }
-        return try await Task.detached {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["python3", "-B", script]
-            let input = Pipe(), output = Pipe()
-            process.standardInput = input; process.standardOutput = output
-            process.standardError = FileHandle.nullDevice
-            try process.run()
-            try input.fileHandleForWriting.write(contentsOf: credential)
-            try input.fileHandleForWriting.close()
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { throw DockError.message("사용량 조회에 실패했습니다.") }
-            return try JSONDecoder().decode(UsageReport.self, from: data)
-        }.value
+        let empty = UsageReport(status: "unavailable", windows: [], activity: [:], checkedAt: nil)
+        guard let json = try JSONSerialization.jsonObject(with: credential) as? [String: Any],
+              let tokens = json["tokens"] as? [String: Any],
+              let token = tokens["access_token"] as? String, let account = tokens["account_id"] as? String else { return empty }
+        if let expiry = CodexService.claims(token)["exp"] as? Double, expiry < Date().timeIntervalSince1970 + 30 {
+            return UsageReport(status: "login_required", windows: [], activity: [:], checkedAt: nil)
+        }
+        let home = try CodexService.temporaryHome()
+        let connection: CodexConnection
+        do { connection = try CodexConnection(binary: CodexService.binary(), home: home, ephemeral: true) }
+        catch { try? FileManager.default.removeItem(at: home); throw error }
+        var requiresLogin = false
+        connection.serverRequest = { method in
+            if method == "account/chatgptAuthTokens/refresh" { requiresLogin = true; connection.close() }
+        }
+        let result: UsageReport
+        do {
+            try await connection.initialize()
+            _ = try await connection.request("account/login/start", params: ["type": "chatgptAuthTokens", "accessToken": token, "chatgptAccountId": account])
+            let limits = try? await connection.request("account/rateLimits/read")
+            let activity = connection.isClosed ? nil : try? await connection.request("account/usage/read")
+            result = normalize(limits: limits, activity: activity, requiresLogin: requiresLogin)
+        } catch {
+            result = UsageReport(status: requiresLogin ? "login_required" : "unavailable", windows: [], activity: [:], checkedAt: nil)
+        }
+        await connection.shutdown()
+        try? FileManager.default.removeItem(at: home)
+        return result
+    }
+    static func normalize(limits: [String: Any]?, activity: [String: Any]?, requiresLogin: Bool = false) -> UsageReport {
+        if requiresLogin { return UsageReport(status: "login_required", windows: [], activity: [:], checkedAt: nil) }
+        var groups = limits?["rateLimitsByLimitId"] as? [String: [String: Any]] ?? [:]
+        if let single = limits?["rateLimits"] as? [String: Any] {
+            let key = single["limitId"] as? String ?? "codex"
+            groups[key] = single.merging(groups[key] ?? [:]) { old, new in new is NSNull ? old : new }
+        }
+        var windows: [UsageWindow] = [], credits: [CreditBalance] = []
+        for key in groups.keys.sorted() {
+            let group = groups[key]!
+            let bucket = group["limitName"] as? String ?? key
+            for role in ["primary", "secondary"] {
+                if let value = group[role] as? [String: Any], let used = number(value["usedPercent"]) {
+                    windows.append(UsageWindow(id: key + ":" + role, bucket: bucket, usedPercent: min(100, max(0, used)),
+                        remainingPercent: 100 - min(100, max(0, used)), windowMinutes: number(value["windowDurationMins"]).flatMap { $0 > 0 && $0 < 10_000_000 ? $0 : nil },
+                        resetsAt: number(value["resetsAt"]).flatMap { $0 > 0 && $0 < 100_000_000_000 ? $0 : nil }))
+                }
+            }
+            if let value = group["credits"] as? [String: Any] {
+                let raw = value["balance"] as? String
+                let balance = raw.flatMap { text -> String? in
+                    guard text.count <= 40, text.range(of: #"^\d{1,19}(?:\.\d{1,8})?$"#, options: .regularExpression) != nil else { return nil }
+                    return text
+                }
+                let status = (value["unlimited"] as? Bool == true) ? "unlimited" : balance != nil ? "balance" :
+                    (value["hasCredits"] as? Bool == false) ? "empty" : (value["hasCredits"] as? Bool == true) ? "available" : "unknown"
+                credits.append(CreditBalance(id: key, bucket: bucket, status: status, balance: balance))
+            }
+        }
+        let reset = (limits?["rateLimitResetCredits"] as? [String: Any])?["availableCount"]
+        let count = number(reset).flatMap { $0 >= 0 && $0 <= 1_000_000 && $0.rounded() == $0 ? Int($0) : nil }
+        var totals: [String: Double] = [:]
+        let summary = activity?["summary"] as? [String: Any] ?? [:]
+        for key in ["lifetimeTokens", "peakDailyTokens"] {
+            if let value = number(summary[key]), value >= 0 { totals[key] = value }
+        }
+        let hasData = !windows.isEmpty || !credits.isEmpty || count != nil || !totals.isEmpty
+        return UsageReport(status: hasData ? (limits != nil && activity != nil ? "available" : "partial") : "unavailable",
+            windows: windows, activity: totals, credits: credits, resetCredits: count, checkedAt: Date().timeIntervalSince1970)
+    }
+    private static func number(_ value: Any?) -> Double? {
+        guard let value = value as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(), value.doubleValue.isFinite else { return nil }
+        return value.doubleValue
     }
 }
 

@@ -29,7 +29,8 @@ final class DockModel: ObservableObject {
     @Published var usage: [String: UsageReport] = [:]
     @Published var usageLoading: Set<String> = []
     @Published var refreshingUsage = false
-    private var process: Process?
+    private var connection: CodexConnection?
+    @Published var addingAccount = false
     var connected: Bool { report?.codex.status == "cached_account" }
     var supportsPresets: Bool { report?.file_presets_supported == true && report?.codex.type == "chatgpt" }
 
@@ -38,11 +39,11 @@ final class DockModel: ObservableObject {
         catch { message = error.localizedDescription }
     }
     func request(_ action: String = "status") async {
-        guard !busy else { return }
+        guard !busy, ["status", "logout"].contains(action) else { return }
         if action != "status", !canMutate() { return }
         busy = true
-        message = action == "login" ? "브라우저에서 로그인해 주세요. 최대 3분 동안 기다립니다." : nil
-        defer { busy = false; process = nil }
+        message = nil
+        defer { busy = false; connection = nil }
         do {
             appAccounts = (try? await AppIdentityReader.read().accounts) ?? ["chatgpt", "codex"].map {
                 AppIdentity(id: $0, product: $0, status: "unavailable", email: nil, plan: nil, home: nil, version: nil)
@@ -57,43 +58,85 @@ final class DockModel: ObservableObject {
             report = action == "status" ? updated : try await run("status")
             lastChecked = Date()
             registerCurrentAccount()
-            if action != "status" { message = action == "login" ? "로그인이 완료되었습니다." : "공유 저장소에서 로그아웃했습니다. 저장한 계정은 유지됩니다." }
+            if action != "status" { message = "공유 저장소에서 로그아웃했습니다. 저장한 계정은 유지됩니다." }
         } catch { report = nil; activeAccountID = nil; message = error.localizedDescription }
     }
-    func cancel() { process?.terminate() }
+    func cancel() { connection?.close() }
     private func run(_ action: String) async throws -> AccountReport {
-        let script = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : Bundle.main.path(forResource: "doctor", ofType: "py")
-        guard let script else {
-            throw DockError.message("scripts/doctor.py 경로를 실행 인자로 전달해 주세요.")
+        let home = URL(fileURLWithPath: AccessSetup.home)
+        if !FileManager.default.fileExists(atPath: home.path) {
+            try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = ["python3", "-B", script, "--show-email", "--action", action, "--codex-home", AccessSetup.home]
-        let output = Pipe()
-        task.standardOutput = output
-        task.standardError = FileHandle.nullDevice
-        try task.run()
-        process = task
-        let data = await Task.detached { output.fileHandleForReading.readDataToEndOfFile() }.value
-        task.waitUntilExit()
-        guard task.terminationStatus == 0 else { throw DockError.message("요청이 취소되었거나 진단 도구를 실행하지 못했습니다.") }
-        return try JSONDecoder().decode(AccountReport.self, from: data)
+        let session = try CodexConnection(binary: CodexService.binary(), home: home)
+        connection = session
+        do {
+            try await session.initialize()
+            if action == "logout" {
+                try ActivityGate.requireIdle(excluding: [session.pid])
+                _ = try await session.request("account/logout")
+            }
+            let value = try await CodexService.report(connection: session, home: home)
+            await session.shutdown()
+            return value
+        } catch { await session.shutdown(); throw error }
     }
     func canMutate() -> Bool {
-        let targets = ["com.openai.codex", "com.openai.chat", "com.microsoft.VSCode"]
-        let names = NSWorkspace.shared.runningApplications.filter { targets.contains($0.bundleIdentifier ?? "") }
-            .compactMap(\.localizedName)
-        guard names.isEmpty else {
-            message = "\(names.joined(separator: ", "))를 먼저 종료해 주세요. 실행 중인 앱이 공유 인증 정보를 다시 쓰는 것을 방지합니다."
-            return false
-        }
-        return true
+        do {
+            guard !addingAccount, !refreshingUsage else { throw DockError.message("진행 중인 계정 확인이 끝난 뒤 전환해 주세요.") }
+            try ActivityGate.requireIdle()
+            return true
+        } catch { message = error.localizedDescription; return false }
+    }
+    func addAccount(name: String) async {
+        guard !busy else { return }
+        busy = true; addingAccount = true
+        message = "브라우저에서 추가할 계정으로 로그인해 주세요. 현재 앱의 계정은 유지됩니다."
+        defer { busy = false; addingAccount = false; connection = nil }
+        var home: URL?
+        do {
+            let isolated = try CodexService.temporaryHome(); home = isolated
+            try Data("cli_auth_credentials_store = \"file\"\n".utf8).write(to: isolated.appendingPathComponent("config.toml"))
+            let session = try CodexConnection(binary: CodexService.binary(), home: isolated)
+            connection = session
+            var completed: Bool?
+            session.notification = { method, parameters in
+                if method == "account/login/completed" { completed = parameters["success"] as? Bool ?? false }
+            }
+            try await session.initialize()
+            let login = try await session.request("account/login/start", params: ["type": "chatgpt"])
+            guard let raw = login["authUrl"] as? String, let url = URL(string: raw), url.scheme == "https",
+                  ["auth.openai.com", "auth.chatgpt.com", "chatgpt.com"].contains(url.host ?? "") else {
+                throw DockError.message("공식 로그인 주소를 확인하지 못했습니다.")
+            }
+            guard NSWorkspace.shared.open(url) else { throw DockError.message("로그인 브라우저를 열지 못했습니다.") }
+            let deadline = Date().addingTimeInterval(180)
+            while completed == nil {
+                guard !session.isClosed, !Task.isCancelled else { throw CancellationError() }
+                guard Date() < deadline else { throw DockError.message("로그인 시간이 초과되었습니다. 다시 추가해 주세요.") }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            guard completed == true else { throw DockError.message("로그인이 완료되지 않았습니다.") }
+            let result = try await CodexService.report(connection: session, home: isolated)
+            guard result.codex.type == "chatgpt", let email = result.codex.email, result.file_presets_supported else {
+                throw DockError.message("추가할 계정의 인증 정보를 확인하지 못했습니다.")
+            }
+            let credential = try PresetVault.credential(at: isolated.path, expectedEmail: email)
+            let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let entry = AccountPreset(id: UUID().uuidString, name: label.isEmpty ? String(email.split(separator: "@").first ?? "계정") : label,
+                email: email, plan: result.codex.plan, savedAt: Date(), credential: credential)
+            try PresetVault.upsert(entry, preserveName: label.isEmpty)
+            loadPresets()
+            message = "계정을 추가했습니다. 사용할 계정은 목록에서 선택하세요. 현재 로그인은 변경하지 않았습니다."
+        } catch is CancellationError { message = "계정 추가를 취소했습니다. 현재 로그인은 유지됩니다." }
+        catch { message = error.localizedDescription }
+        await connection?.shutdown()
+        if let home { try? FileManager.default.removeItem(at: home) }
     }
     func savePreset(name: String) async {
         guard !busy else { return }
         await request()
         guard let report, connected, supportsPresets, let email = report.codex.email else {
-            message = "파일 방식으로 로그인한 ChatGPT 계정만 저장할 수 있습니다. Python 3.11 이상도 필요합니다."
+            message = "파일 방식으로 로그인한 ChatGPT 계정만 저장할 수 있습니다. 공식 Codex 실행 파일이 필요합니다."
             return
         }
         do {
@@ -107,32 +150,32 @@ final class DockModel: ObservableObject {
     }
     func activate(_ preset: AccountPreset) async {
         guard !busy, canMutate() else { return }
-        await request()
-        guard let report, report.file_presets_supported,
-              ["cached_account", "signed_out"].contains(report.codex.status) else {
-            message = "인증 상태와 파일 저장 방식을 먼저 확인해 주세요."
-            return
-        }
-        guard canMutate() else { return }
+        busy = true
+        message = "저장한 인증의 유효성을 확인하고 있습니다. 아직 계정은 변경하지 않았습니다."
+        defer { busy = false; connection = nil }
         do {
-            if connected {
-                guard let email = report.codex.email, report.codex.type == "chatgpt" else {
-                    message = "현재 인증 방식은 자동 백업을 지원하지 않아 전환하지 않았습니다."
-                    return
-                }
-                let backup = AccountPreset(id: UUID().uuidString, name: "전환 전 자동 백업", email: email,
-                    plan: report.codex.plan, savedAt: Date(), credential: try PresetVault.credential(at: report.codex_home, expectedEmail: email))
-                try PresetVault.upsert(backup)
+            let home = URL(fileURLWithPath: AccessSetup.home)
+            let before = try AuthTransaction.snapshot(home.appendingPathComponent("auth.json"))
+            let current = try await run("status")
+            guard current.file_presets_supported, ["cached_account", "signed_out"].contains(current.codex.status) else {
+                throw DockError.message("파일 방식 인증을 확인하지 못해 전환하지 않았습니다.")
             }
-            let latest = presets.first { $0.id == preset.id } ?? preset
-            try PresetVault.restore(latest, home: report.codex_home)
-            loadPresets()
-            await request()
-            if self.report?.codex.status == "cached_account", self.report?.codex.email == preset.email {
-                message = "저장한 계정을 공유 저장소에 적용했습니다. 앱에서 다시 확인해 주세요. 인증이 만료되었다면 재로그인이 필요합니다."
-            } else {
-                message = "파일은 적용했지만 계정 확인에 실패했습니다. 전환 전 자동 백업을 선택해 복원할 수 있습니다."
+            let latest = (try PresetVault.all()).first { $0.id == preset.id } ?? preset
+            let validation = try await UsageReader.read(latest.credential)
+            guard ["available", "partial"].contains(validation.status) else {
+                throw DockError.message(validation.status == "login_required" ? "저장된 인증이 만료되었습니다. 계정 추가에서 다시 로그인해 주세요. 현재 계정은 유지됩니다." : "인증 유효성을 확인하지 못해 전환하지 않았습니다. 네트워크를 확인해 주세요.")
             }
+            // Back up only after proving the current metadata still matches the file.
+            if current.codex.status == "cached_account" {
+                guard let email = current.codex.email, current.codex.type == "chatgpt" else { throw DockError.message("현재 인증의 자동 백업을 지원하지 않아 전환하지 않았습니다.") }
+                let credential = try PresetVault.credential(at: home.path, expectedEmail: email)
+                guard credential == before else { throw DockError.message("인증 정보가 변경되어 전환을 중단했습니다.") }
+                try PresetVault.upsert(AccountPreset(id: UUID().uuidString, name: "전환 전 자동 백업", email: email, plan: current.codex.plan, savedAt: Date(), credential: credential))
+            }
+            try AuthTransaction.install(latest.credential, home: home, expected: before) { try ActivityGate.requireIdle() }
+            report = AccountReport(codex: AccountInfo(status: "cached_account", type: "chatgpt", email: latest.email, plan: latest.plan, reason: nil), codex_home: home.path, file_presets_supported: true)
+            registerCurrentAccount()
+            message = "계정을 적용했습니다. 앱을 다시 열어 로그인 계정을 확인해 주세요."
         } catch { message = error.localizedDescription }
     }
     func registerCurrentAccount() {
@@ -148,7 +191,7 @@ final class DockModel: ObservableObject {
         } catch { message = "현재 계정을 자동 등록하지 못했습니다. 접근 및 개인정보 화면에서 Keychain 접근을 확인해 주세요." }
     }
     func refreshUsage() async {
-        guard !refreshingUsage else { return }
+        guard !refreshingUsage, !busy else { return }
         guard UserDefaults.standard.object(forKey: "accountDock.usageEnabled") as? Bool ?? true else {
             usage = [:]
             return
@@ -176,6 +219,8 @@ struct Dashboard: View {
     @AppStorage("accountDock.setupCompleted.v1") private var setupCompleted = false
     @State private var showSetup = false
     @State private var showSave = false
+    @State private var showAdd = false
+    @State private var newAccountName = ""
     @State private var presetName = ""
     @State private var pendingPreset: AccountPreset?
     @State private var showLogout = false
@@ -221,6 +266,21 @@ struct Dashboard: View {
             }.frame(width: 660, height: 650).interactiveDismissDisabled()
         }
         .sheet(isPresented: $showSave) { saveSheet }
+        .sheet(isPresented: $showAdd) {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("계정 추가").font(.title2.weight(.semibold))
+                Text("별도 로그인 창에서 계정을 등록합니다. ChatGPT·VS Code의 현재 계정은 변경하지 않습니다.").font(.system(size: 12))
+                TextField("이름 (선택) · 개인용, 업무용", text: $newAccountName).textFieldStyle(.roundedBorder)
+                HStack {
+                    Spacer()
+                    Button("취소") { showAdd = false }.buttonStyle(DockButtonStyle())
+                    Button("브라우저에서 로그인") {
+                        let name = newAccountName; showAdd = false
+                        Task { await model.addAccount(name: name) }
+                    }.buttonStyle(DockButtonStyle(kind: .primary))
+                }
+            }.padding(28).frame(width: 440).background(DockTheme.canvas)
+        }
         .alert("공유 저장소에서 로그아웃할까요?", isPresented: $showLogout) {
             Button("취소", role: .cancel) {}
             Button("로그아웃", role: .destructive) { Task { await model.request("logout") } }
@@ -307,13 +367,13 @@ struct Dashboard: View {
             }
             Divider().opacity(0.5)
             HStack {
-                Text("아래 로그인·로그아웃은 공유 저장소에 적용됩니다.")
+                Text("계정 추가는 별도로 로그인하며, 로그아웃은 공유 저장소에 적용됩니다.")
                     .font(.system(size: 11)).foregroundStyle(muted)
                 Spacer()
                 if model.connected {
                     Button("로그아웃") { showLogout = true }.buttonStyle(DockButtonStyle(kind: .quiet)).foregroundStyle(muted).disabled(model.busy)
                 }
-                Button(model.connected ? "다른 계정 로그인" : "로그인") { Task { await model.request("login") } }
+                Button("계정 추가") { newAccountName = ""; showAdd = true }
                     .buttonStyle(DockButtonStyle(kind: .primary)).disabled(model.busy)
             }
         }.padding(24).background(.white, in: RoundedRectangle(cornerRadius: 18))
@@ -341,6 +401,7 @@ struct Dashboard: View {
                 Spacer()
                 Button { Task { await model.refreshUsage() } } label: { Label(model.refreshingUsage ? "조회 중…" : "사용량 확인", systemImage: "chart.bar") }
                     .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.refreshingUsage || model.presets.isEmpty)
+                Button { newAccountName = ""; showAdd = true } label: { Label("계정 추가", systemImage: "plus") }.buttonStyle(DockButtonStyle(kind: .primary)).disabled(model.busy)
                 Button { presetName = ""; showSave = true } label: { Label("계정 이름 지정", systemImage: "pencil") }
                     .font(.system(size: 11)).buttonStyle(DockButtonStyle(kind: .quiet))
                     .disabled(!model.connected || !model.supportsPresets || model.busy)
@@ -370,7 +431,7 @@ struct Dashboard: View {
                         }
                         Spacer()
                         Text(preset.savedAt, style: .date).font(.system(size: 10)).foregroundStyle(muted)
-                        Button("선택") { pendingPreset = preset; showSwitch = true }.buttonStyle(DockButtonStyle()).disabled(model.busy || model.activeAccountID == preset.id)
+                        Button("전환") { pendingPreset = preset; showSwitch = true }.buttonStyle(DockButtonStyle()).disabled(model.busy || model.activeAccountID == preset.id)
                         Button { pendingDelete = preset; showDelete = true } label: { Image(systemName: "trash").accessibilityLabel("저장한 계정 삭제") }
                             .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.busy || model.activeAccountID == preset.id)
                     }

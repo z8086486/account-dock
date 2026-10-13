@@ -83,3 +83,12 @@ __pycache__/
 !/scripts/app_accounts.py
 !/tests/test_app_accounts.py
 !/RELEASE_CHECKLIST.md
+
+# Reviewed native runtime, switch protection, and local installation tooling.
+!/Sources/AccountDock/CodexService.swift
+!/Sources/AccountDock/SwitchSafety.swift
+!/Sources/AccountDock/VersionService.swift
+!/scripts/install_local.py
+!/scripts/release_preflight.py
+!/tests/AccountDockTests/NativeTests.swift
+!/tests/test_install_local.py
