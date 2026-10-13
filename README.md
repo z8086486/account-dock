@@ -4,7 +4,7 @@ macOS에서 AI 서비스의 계정과 로그인 상태를 한곳에서 관리하
 
 ChatGPT 앱에는 개인 계정, VS Code 확장에는 업무 계정을 사용하는 것처럼, 사용 환경별로 계정을 확인하고 전환하는 것을 목표로 합니다. 현재는 **OpenAI ChatGPT·Codex를 대상으로 개발 중인 초기 시제품**이며, 향후 **Anthropic Claude 등 다른 AI 서비스**도 지원할 예정입니다.
 
-> 현재 버전은 Codex 공유 인증 저장소의 계정 조회, 로그인·로그아웃, Keychain 계정 저장·적용을 제공합니다. ChatGPT와 VS Code의 계정을 각각 분리하는 기능은 아직 지원하지 않습니다. 실제 계정 두 개를 사용한 전환 검증은 남아 있습니다.
+> 현재 버전은 Codex 공유 인증 저장소의 계정 조회, 로그인·로그아웃, Keychain 계정 저장·적용을 제공합니다. 0.7.0부터 별도 VS Code 인스턴스에 저장한 계정을 적용하는 실험 기능을 제공합니다. 기존 VS Code 창의 계정을 그대로 교체하는 기능과 실제 세션 자동 검증은 아직 지원하지 않습니다.
 
 ## 현재 기능
 
@@ -18,6 +18,7 @@ ChatGPT 앱에는 개인 계정, VS Code 확장에는 업무 계정을 사용하
 - 저장한 계정 적용 전 현재 계정 자동 백업 및 실행 중인 앱 변경 차단
 - 하늘색·오렌지·짙은 남색의 전용 UI, 커스텀 버튼과 독자 제작 앱 아이콘
 - Account Dock, ChatGPT, Codex의 설치 버전·최신 버전·검증 범위 표시
+- **VS Code에 적용:** 전용 인증 폴더와 별도 VS Code 인스턴스로 계정 연결
 - 공식 CLI를 이용한 Codex 확장 업데이트
 - 명령줄에서 앱 설치 여부 및 Codex 인증 상태 확인
 - 지정한 `CODEX_HOME`의 인증 상태 조회
@@ -91,6 +92,10 @@ python3 scripts/doctor.py --binary /absolute/path/to/codex
 | `unavailable` | Codex 실행 파일을 찾지 못함 |
 | `error` | 조회 실패. 로그아웃 상태와 구분됨 |
 
+## VS Code만 다른 계정 사용하기
+
+저장한 계정에서 **VS Code에 적용 → 적용하고 열기**를 선택하세요. `Account Dock` 제목의 별도 VS Code 창이 열립니다. ChatGPT와 기존 VS Code 계정은 유지합니다. 기존 설정·MCP·대화 기록은 자동 복사하지 않습니다. 다음 전환 전에는 전용 VS Code를 종료해야 합니다. 자세한 동작과 한계는 [VS Code 분리 안내](ISOLATION.md)를 확인하세요.
+
 ## 앱별 계정 조회 범위
 
 **계정 관리**의 ChatGPT·VS Code 카드는 각 앱에 직접 연결된 로컬 Codex 프로세스를 식별하고, 그 프로세스의 `CODEX_HOME` 또는 `HOME`에서 인증 폴더를 구합니다. Account Dock에서 선택한 공유 폴더를 두 앱에 일괄 대입하지 않습니다. 인증 파일의 이메일과 플랜만 읽으며 로그인을 변경하지 않습니다.
@@ -99,7 +104,7 @@ python3 scripts/doctor.py --binary /absolute/path/to/codex
 
 현재 지원 경로는 `/Applications/ChatGPT.app`, `/Applications/Visual Studio Code.app`와 기본 `~/.vscode/extensions` 아래 공식 Codex 확장입니다. 여러 로컬 창이 서로 다른 폴더나 확장 버전을 쓰면 각각 표시합니다. 앱 종료·프로세스 접근 불가·미지원 인증 방식에서는 계정을 추정하지 않습니다.
 
-**이 값은 파일에 저장된 계정이며 앱의 메모리 세션은 미검증입니다.** 실행 중인 앱이 외부 토큰을 사용하거나 인증 파일과 다른 세션을 유지할 수 있습니다. 앱별 독립 로그인·전환을 완성하려면 실제 세션과 대조하는 연동이 추가로 필요합니다. 원격 SSH·WSL·사용자 지정 설치 경로는 아직 지원하지 않습니다.
+**이 값은 파일에 저장된 계정이며 앱의 메모리 세션은 미검증입니다.** 실행 중인 앱이 외부 토큰을 사용하거나 인증 파일과 다른 세션을 유지할 수 있습니다. 전용 VS Code 분리 기능과 별개로 실제 세션을 자동 대조하는 연동은 추가로 필요합니다. 원격 SSH·WSL·사용자 지정 설치 경로는 아직 지원하지 않습니다.
 
 ## 계정별 사용량
 
@@ -159,6 +164,7 @@ Sources/AccountDock/AccountStore.swift  Keychain 계정 저장·복원
 Sources/AccountDock/Setup.swift 첫 실행 접근 설정
 Sources/AccountDock/CodexService.swift  공식 app-server Swift 연결
 Sources/AccountDock/SwitchSafety.swift  실행 중 보호 및 인증 파일 전환
+Sources/AccountDock/VSCodeIsolation.swift 전용 VS Code 연결
 Sources/AccountDock/AppAccounts.swift   앱별 인증 저장소 조회
 Sources/AccountDock/Usage.swift 계정별 한도·크레딧 조회 및 화면
 Sources/AccountDock/VersionService.swift 버전 조회·확장 업데이트

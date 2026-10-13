@@ -92,3 +92,6 @@ __pycache__/
 !/scripts/release_preflight.py
 !/tests/AccountDockTests/NativeTests.swift
 !/tests/test_install_local.py
+
+!/Sources/AccountDock/VSCodeIsolation.swift
+!/ISOLATION.md

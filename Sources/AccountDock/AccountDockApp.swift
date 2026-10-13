@@ -31,6 +31,7 @@ final class DockModel: ObservableObject {
     @Published var refreshingUsage = false
     private var connection: CodexConnection?
     @Published var addingAccount = false
+    @Published var canCancelLogin = false
     @Published var waitingForKeychain = false
     var connected: Bool { report?.codex.status == "cached_account" }
     var supportsPresets: Bool { report?.file_presets_supported == true && report?.codex.type == "chatgpt" }
@@ -95,7 +96,7 @@ final class DockModel: ObservableObject {
         guard !busy else { return }
         busy = true; addingAccount = true
         message = "브라우저에서 추가할 계정으로 로그인해 주세요. 현재 앱의 계정은 유지됩니다."
-        defer { busy = false; addingAccount = false; connection = nil }
+        defer { busy = false; addingAccount = false; canCancelLogin = false; connection = nil }
         var home: URL?
         do {
             let isolated = try CodexService.temporaryHome(); home = isolated
@@ -112,6 +113,7 @@ final class DockModel: ObservableObject {
                   ["auth.openai.com", "auth.chatgpt.com", "chatgpt.com"].contains(url.host ?? "") else {
                 throw DockError.message("공식 로그인 주소를 확인하지 못했습니다.")
             }
+            canCancelLogin = true
             guard NSWorkspace.shared.open(url) else { throw DockError.message("로그인 브라우저를 열지 못했습니다.") }
             let deadline = Date().addingTimeInterval(180)
             while completed == nil {
@@ -119,6 +121,7 @@ final class DockModel: ObservableObject {
                 guard Date() < deadline else { throw DockError.message("로그인 시간이 초과되었습니다. 다시 추가해 주세요.") }
                 try await Task.sleep(for: .milliseconds(100))
             }
+            canCancelLogin = false
             guard completed == true else { throw DockError.message("로그인이 완료되지 않았습니다.") }
             let result = try await CodexService.report(connection: session, home: isolated)
             guard result.codex.type == "chatgpt", let email = result.codex.email, result.file_presets_supported else {
@@ -185,6 +188,66 @@ final class DockModel: ObservableObject {
             message = "계정을 적용했습니다. 앱을 다시 열어 로그인 계정을 확인해 주세요."
         } catch { message = error.localizedDescription }
     }
+    func applyToVSCode(_ preset: AccountPreset) async {
+        guard !busy, !refreshingUsage else { return }
+        busy = true
+        defer { busy = false }
+        message = "전용 VS Code에 적용할 계정을 확인하고 있습니다."
+        do {
+            guard FileManager.default.isExecutableFile(atPath: VSCodeIsolation.executable.path),
+                  VersionService.extensionVersion() != nil else { throw DockError.message("기본 경로에 VS Code와 공식 Codex 확장을 설치해 주세요.") }
+            try VSCodeIsolation.requireStopped()
+            try VSCodeIsolation.prepare()
+            let home = VSCodeIsolation.home
+            let before = try AuthTransaction.snapshot(home.appendingPathComponent("auth.json"))
+            let inspection = try CodexConnection(binary: CodexService.binary(), home: home)
+            do {
+                try await inspection.initialize()
+                let report = try await CodexService.report(connection: inspection, home: home)
+                await inspection.shutdown()
+                guard report.file_presets_supported else { throw DockError.message("전용 VS Code의 인증 저장 방식이 변경되었습니다. 파일 방식만 지원합니다.") }
+            } catch { await inspection.shutdown(); throw error }
+            let latest = (try await AccountVault.shared.all()).first { $0.id == preset.id }
+            guard let latest else { throw DockError.message("저장한 계정을 다시 선택해 주세요.") }
+            let validation = try await UsageReader.read(latest.credential)
+            guard ["available", "partial"].contains(validation.status) else {
+                throw DockError.message("저장한 인증이 만료되었거나 유효성을 확인하지 못했습니다. 계정 추가에서 다시 로그인해 주세요. 기존 인증은 유지됩니다.")
+            }
+            if before != nil {
+                let identity = try AppIdentityReader.storedIdentity(home.path)
+                guard let email = identity.email else { throw DockError.message("전용 VS Code의 기존 계정을 백업할 수 없어 전환하지 않았습니다.") }
+                let credential = try PresetVault.credential(at: home.path, expectedEmail: email)
+                guard credential == before else { throw DockError.message("전용 인증이 변경되어 중단했습니다.") }
+                try await AccountVault.shared.upsert(AccountPreset(id: UUID().uuidString, name: "VS Code 이전 계정", email: email, plan: identity.plan, savedAt: Date(), credential: credential))
+            }
+            try AuthTransaction.install(latest.credential, home: home, expected: before) {
+                try VSCodeIsolation.validateDirectory(home)
+                try VSCodeIsolation.requireStopped()
+            }
+            do { try await VSCodeIsolation.launch() }
+            catch {
+                do {
+                    try AuthTransaction.rollback(before, home: home, expected: latest.credential) {
+                        try VSCodeIsolation.validateDirectory(home)
+                        try VSCodeIsolation.requireStopped()
+                    }
+                } catch {
+                    throw DockError.message("VS Code 실행을 확인하지 못했습니다. 실행 중이거나 인증 파일이 변경되어 자동 복구하지 않았습니다. 전용 창의 상태를 확인해 주세요. ChatGPT와 기존 VS Code 인증은 유지됩니다.")
+                }
+                throw DockError.message("VS Code 실행에 실패해 이전 전용 인증으로 복구했습니다. 기존 앱 계정은 유지됩니다.")
+            }
+            // Observe the extension process itself using this home; this is not a live-session claim.
+            var attached = false
+            for _ in 0..<30 {
+                let result = try await AppIdentityReader.read()
+                appAccounts = result.accounts
+                if result.accounts.contains(where: { $0.product == "codex" && $0.home == home.path }) { attached = true; break }
+                try await Task.sleep(for: .seconds(1))
+            }
+            await loadPresets()
+            message = attached ? "전용 VS Code의 인증 폴더 연결을 확인했습니다. 확장 설정에서 실제 로그인 계정을 확인해 주세요. ChatGPT와 기존 VS Code 계정은 변경하지 않았습니다." : "전용 폴더에 계정을 적용했지만 확장 연결은 아직 확인되지 않았습니다. 전용 창에서 Codex를 열고 새로고침해 주세요."
+        } catch { message = error.localizedDescription }
+    }
     func registerCurrentAccount() async {
         activeAccountID = nil
         guard let report, connected, supportsPresets, let email = report.codex.email else { return }
@@ -230,6 +293,7 @@ struct Dashboard: View {
     @State private var showSetup = false
     @State private var showSave = false
     @State private var showAdd = false
+    @State private var showVSCode = false
     @State private var newAccountName = ""
     @State private var presetName = ""
     @State private var pendingPreset: AccountPreset?
@@ -252,7 +316,7 @@ struct Dashboard: View {
                             Image(systemName: "info.circle")
                             Text(message).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
                             Spacer()
-                            if model.busy && !model.waitingForKeychain { Button("취소") { model.cancel() } }
+                            if model.canCancelLogin { Button("취소") { model.cancel() } }
                             else if !model.waitingForKeychain { Button { model.message = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }
                         }.padding(14).background(accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                     }
@@ -291,6 +355,10 @@ struct Dashboard: View {
                 }
             }.padding(28).frame(width: 440).background(DockTheme.canvas)
         }
+        .alert("전용 VS Code에 이 계정을 적용할까요?", isPresented: $showVSCode, presenting: pendingPreset) { preset in
+            Button("취소", role: .cancel) {}
+            Button("적용하고 열기") { Task { await model.applyToVSCode(preset) } }
+        } message: { _ in Text("별도의 VS Code 창을 엽니다. ChatGPT·기존 VS Code 계정은 유지됩니다. 기존 설정·MCP·스킬·대화 기록은 복사하지 않으며 전용 창은 별도로 관리됩니다. 다음 전환 전에는 전용 VS Code를 종료해야 합니다.") }
         .alert("공유 저장소에서 로그아웃할까요?", isPresented: $showLogout) {
             Button("취소", role: .cancel) {}
             Button("로그아웃", role: .destructive) { Task { await model.request("logout") } }
@@ -435,13 +503,14 @@ struct Dashboard: View {
                         VStack(alignment: .leading, spacing: 5) {
                             HStack(spacing: 8) {
                                 Text(preset.name).font(.system(size: 13, weight: .medium))
-                                if model.activeAccountID == preset.id { Text("현재 로그인").font(.system(size: 9, weight: .semibold)).padding(.horizontal, 7).padding(.vertical, 4).background(DockTheme.blue.opacity(0.5), in: Capsule()) }
+                                if model.activeAccountID == preset.id { Text("공유 계정").font(.system(size: 9, weight: .semibold)).padding(.horizontal, 7).padding(.vertical, 4).background(DockTheme.blue.opacity(0.5), in: Capsule()) }
                             }
                             Text(preset.email).font(.system(size: 11)).foregroundStyle(muted)
                         }
                         Spacer()
                         Text(preset.savedAt, style: .date).font(.system(size: 10)).foregroundStyle(muted)
-                        Button("전환") { pendingPreset = preset; showSwitch = true }.buttonStyle(DockButtonStyle()).disabled(model.busy || model.activeAccountID == preset.id)
+                        Button("공유 계정 전환") { pendingPreset = preset; showSwitch = true }.buttonStyle(DockButtonStyle()).disabled(model.busy || model.activeAccountID == preset.id)
+                        Button("VS Code에 적용") { pendingPreset = preset; showVSCode = true }.buttonStyle(DockButtonStyle(kind: .primary)).disabled(model.busy || model.refreshingUsage)
                         Button { pendingDelete = preset; showDelete = true } label: { Image(systemName: "trash").accessibilityLabel("저장한 계정 삭제") }
                             .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.busy || model.activeAccountID == preset.id)
                     }

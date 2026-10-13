@@ -154,6 +154,9 @@ struct AppAccountCard: View {
                         Text("설치 버전과 다름 · VS Code 재시작 후 확인")
                             .font(.system(size: 10)).foregroundStyle(DockTheme.muted)
                     }
+                    if account.home == VSCodeIsolation.home.path {
+                        Text("Account Dock 전용 VS Code").font(.system(size: 10, weight: .semibold)).foregroundStyle(DockTheme.orange)
+                    }
                     if let home = account.home {
                         Text(home.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
                             .font(.system(size: 10, design: .monospaced)).foregroundStyle(DockTheme.muted)

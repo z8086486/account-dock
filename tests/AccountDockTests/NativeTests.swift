@@ -84,6 +84,39 @@ final class NativeTests: XCTestCase {
         await connection.shutdown()
         XCTAssertTrue(connection.isClosed)
     }
+    func testIsolatedRollbackPreservesExternalWritesAndRestoresSignedOut() throws {
+        let directory = try home(), path = directory.appendingPathComponent("auth.json")
+        let applied = Data("candidate".utf8), original = Data("original".utf8)
+        try applied.write(to: path)
+        try AuthTransaction.rollback(original, home: directory, expected: applied) {}
+        XCTAssertEqual(try Data(contentsOf: path), original)
+        XCTAssertThrowsError(try AuthTransaction.rollback(nil, home: directory, expected: applied) {})
+        XCTAssertEqual(try Data(contentsOf: path), original)
+        XCTAssertThrowsError(try AuthTransaction.rollback(nil, home: directory, expected: original) { throw CancellationError() })
+        XCTAssertEqual(try Data(contentsOf: path), original)
+        try AuthTransaction.rollback(nil, home: directory, expected: original) {}
+        XCTAssertNil(try AuthTransaction.snapshot(path))
+    }
+    @MainActor func testManagedVSCodeGuardDoesNotTargetExistingApps() {
+        let home = URL(fileURLWithPath: "/tmp/account-dock-test/codex")
+        let user = URL(fileURLWithPath: "/tmp/account-dock-test/user-data")
+        XCTAssertFalse(VSCodeIsolation.targetsManagedStore(args: ["app-server"], environment: ["CODEX_HOME": "/tmp/shared-codex"], home: home, userData: user))
+        XCTAssertTrue(VSCodeIsolation.targetsManagedStore(args: ["app-server"], environment: ["CODEX_HOME": home.path], home: home, userData: user))
+        XCTAssertTrue(VSCodeIsolation.targetsManagedStore(args: ["--user-data-dir", user.path], environment: [:], home: home, userData: user))
+        XCTAssertTrue(VSCodeIsolation.targetsManagedStore(args: ["--user-data-dir=" + user.path], environment: [:], home: home, userData: user))
+        let environment = VSCodeIsolation.launchEnvironment(["HOME": "/Users/fixture", "CODEX_HOME": "/tmp/shared-codex", "VSCODE_IPC_HOOK_CLI": "existing-window", "OPENAI_API_KEY": "fixture", "ELECTRON_RUN_AS_NODE": "1"], home: home)
+        XCTAssertEqual(environment["CODEX_HOME"], home.path)
+        XCTAssertEqual(environment["HOME"], "/Users/fixture")
+        XCTAssertNil(environment["VSCODE_IPC_HOOK_CLI"])
+        XCTAssertNil(environment["OPENAI_API_KEY"])
+        XCTAssertNil(environment["ELECTRON_RUN_AS_NODE"])
+    }
+    @MainActor func testManagedDirectoryRejectsSymlinks() throws {
+        let directory = try home()
+        let link = directory.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: directory)
+        XCTAssertThrowsError(try VSCodeIsolation.validateDirectory(link))
+    }
     @MainActor func testLiveReadOnlyWhenExplicitlyEnabled() async throws {
         guard ProcessInfo.processInfo.environment["ACCOUNT_DOCK_LIVE_CHECK"] == "1" else { throw XCTSkip("Opt-in local read-only check") }
         let directory = URL(fileURLWithPath: AccessSetup.home)

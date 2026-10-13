@@ -8,7 +8,7 @@
 
 `Sources/AccountDock/Resources/release.json`을 버전 정보의 원본으로 사용합니다.
 
-- `version`: Account Dock의 SemVer 버전. 현재 `0.6.0`.
+- `version`: Account Dock의 SemVer 버전. 현재 `0.7.0`.
 - `build`: 배포 후보마다 증가하는 정수. Sparkle의 업데이트 비교에 사용하는 `CFBundleVersion`으로 전달됩니다. 같은 빌드 번호를 재사용하지 않습니다.
 - `channel`: 현재 `preview`. 공개 안정판은 출시 검증 후 변경합니다.
 - `minimumMacOS`: 지원 macOS 하한.

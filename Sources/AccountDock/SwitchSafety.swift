@@ -60,6 +60,18 @@ enum AuthTransaction {
             throw error
         }
     }
+    static func rollback(_ previous: Data?, home: URL, expected: Data, beforeWrite: () throws -> Void) throws {
+        if let previous { try install(previous, home: home, expected: expected, beforeWrite: beforeWrite); return }
+        let fd = open(home.appendingPathComponent(".account-dock.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW, S_IRUSR | S_IWUSR)
+        guard fd >= 0 else { throw DockError.message("복구 잠금을 만들지 못했습니다.") }
+        defer { close(fd) }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw DockError.message("다른 전환이 진행 중입니다.") }
+        defer { flock(fd, LOCK_UN) }
+        let path = home.appendingPathComponent("auth.json")
+        guard try snapshot(path) == expected else { throw DockError.message("인증 정보가 변경되어 자동 복구하지 않았습니다.") }
+        try beforeWrite()
+        guard try snapshot(path) == expected, unlink(path.path) == 0 else { throw DockError.message("이전 로그아웃 상태를 복구하지 못했습니다.") }
+    }
     static func snapshot(_ path: URL) throws -> Data? {
         let descriptor = open(path.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
         guard descriptor >= 0 else {
