@@ -314,7 +314,6 @@ struct Dashboard: View {
     @State private var showAdd = false
     @State private var showVSCode = false
     @State private var newAccountName = ""
-    @State private var presetName = ""
     @State private var pendingPreset: AccountPreset?
     @State private var showLogout = false
     @State private var showSwitch = false
@@ -376,7 +375,12 @@ struct Dashboard: View {
                 Task { await start() }
             }.frame(width: 660, height: 650).interactiveDismissDisabled()
         }
-        .sheet(item: $renamingPreset) { preset in saveSheet(preset) }
+        .sheet(item: $renamingPreset) { preset in
+            AccountNameSheet(preset: preset) { name in
+                renamingPreset = nil
+                Task { await model.renameAccount(preset, name: name) }
+            }
+        }
         .sheet(isPresented: $showAdd) {
             VStack(alignment: .leading, spacing: 18) {
                 Text("계정 추가").font(.title2.weight(.semibold))
@@ -558,7 +562,7 @@ struct Dashboard: View {
                         Spacer()
                         Text(preset.savedAt, style: .date).font(.system(size: 10)).foregroundStyle(muted)
                         Button {
-                            presetName = preset.name; renamingPreset = preset
+                            renamingPreset = preset
                         } label: { Label("이름 변경", systemImage: "pencil") }
                             .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(model.busy)
                         Button { pendingDelete = preset; showDelete = true } label: { Image(systemName: "trash").accessibilityLabel("저장한 계정 삭제") }
@@ -591,22 +595,32 @@ struct Dashboard: View {
             .font(.system(size: 10)).foregroundStyle(green ? ink : muted)
             .padding(.horizontal, 9).padding(.vertical, 5).background((green ? ink : muted).opacity(0.08), in: Capsule())
     }
-    private func saveSheet(_ preset: AccountPreset) -> some View {
+}
+
+private struct AccountNameSheet: View {
+    let preset: AccountPreset
+    let onSave: (String) -> Void
+    @State private var name: String
+    @Environment(\.dismiss) private var dismiss
+
+    init(preset: AccountPreset, onSave: @escaping (String) -> Void) {
+        self.preset = preset
+        self.onSave = onSave
+        _name = State(initialValue: preset.name)
+    }
+    var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("계정 이름 지정").font(.title2.weight(.semibold))
             Text("\(preset.email)의 이름을 지정하세요. 로그인 정보는 변경하지 않습니다.")
-                .font(.system(size: 12)).foregroundStyle(muted)
-            TextField("예: 개인용, 업무용", text: $presetName).textFieldStyle(.plain).padding(13).background(.white, in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).stroke(ink.opacity(0.15)))
+                .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+            TextField("예: 개인용, 업무용", text: $name).textFieldStyle(.plain).padding(13)
+                .background(.white, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(DockTheme.navy.opacity(0.15)))
             HStack {
                 Spacer()
-                Button("취소") { renamingPreset = nil }.buttonStyle(DockButtonStyle())
-                Button("저장") {
-                    let name = presetName; renamingPreset = nil
-                    Task { await model.renameAccount(preset, name: name) }
-                }
-                    .buttonStyle(DockButtonStyle(kind: .primary))
-                    .disabled(presetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("취소") { dismiss() }.buttonStyle(DockButtonStyle())
+                Button("저장") { onSave(name) }.buttonStyle(DockButtonStyle(kind: .primary))
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }.padding(28).frame(width: 420).background(DockTheme.canvas)
     }
