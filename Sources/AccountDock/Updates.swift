@@ -27,24 +27,39 @@ struct ProductVersion: Decodable, Identifiable {
 struct VersionReport: Decodable { let products: [ProductVersion] }
 
 @MainActor
-final class UpdateCenter: ObservableObject {
+final class UpdateCenter: NSObject, ObservableObject, SPUUpdaterDelegate {
     @Published var products: [ProductVersion] = []
     @Published var busy = false
     @Published var message: String?
     @Published var checkedAt: Date?
     private var controller: SPUStandardUpdaterController?
     var selfUpdateReady: Bool { controller != nil }
-    init() {
-        // Development binaries and unsigned previews must never run an updater.
+    var canRestart: () -> Bool = { true }
+    override init() {
+        super.init()
+        // Only packaged apps with the update verification key may use Sparkle.
         if Bundle.main.bundleURL.pathExtension == "app",
            let feed = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
            URL(string: feed)?.scheme == "https",
            let key = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
            Data(base64Encoded: key)?.count == 32 {
-            controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+            controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
         }
     }
-    func checkSelf() { controller?.checkForUpdates(nil) }
+    func checkSelf() {
+        guard canRestart() else { message = "계정 작업이 끝난 뒤 업데이트를 확인해 주세요."; return }
+        controller?.checkForUpdates(nil)
+    }
+    func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
+                 untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
+        guard !canRestart() else { return false }
+        message = "계정 작업을 마친 뒤 업데이트를 설치합니다."
+        Task { @MainActor in
+            while !canRestart() { try? await Task.sleep(for: .milliseconds(250)) }
+            installHandler()
+        }
+        return true
+    }
     func downloadPreview() async {
         guard !busy else { return }
         busy = true
@@ -145,7 +160,7 @@ struct UpdatePanel: View {
                 }.padding(22).background(.white, in: RoundedRectangle(cornerRadius: 16))
                     .overlay(RoundedRectangle(cornerRadius: 16).stroke(DockTheme.navy.opacity(0.09)))
             }
-            if !center.selfUpdateReady {
+            Group {
                 Text("프리뷰는 Apple 공증을 받지 않았습니다. macOS 실행 확인과 업데이트 후 Keychain 접근 요청이 나타날 수 있습니다. 저장한 계정은 앱 외부의 Keychain에 유지됩니다.")
                     .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
             }

@@ -1,60 +1,93 @@
-# Account Dock
+<p align="center">
+  <img src="assets/icon.png" width="112" alt="Account Dock 앱 아이콘" />
+</p>
+<h1 align="center">Account Dock</h1>
+<p align="center">내 계정, 한눈에.<br />macOS에서 Codex 계정을 관리하고, VS Code를 다른 계정으로 사용하세요.</p>
+<p align="center">
+  <a href="https://github.com/z8086486/account-dock/releases"><img alt="버전" src="https://img.shields.io/github/v/release/z8086486/account-dock?include_prereleases&label=preview&color=FF6B24" /></a>
+  <img alt="macOS 14 이상" src="https://img.shields.io/badge/macOS-14%2B-ADD8E6" />
+  <img alt="Apple Silicon" src="https://img.shields.io/badge/Apple-Silicon-102A38" />
+  <img alt="SwiftUI" src="https://img.shields.io/badge/UI-SwiftUI-FF6B24" />
+</p>
+<p align="center">
+  <a href="https://github.com/z8086486/account-dock/releases">다운로드</a> ·
+  <a href="#시작하기">시작하기</a> ·
+  <a href="#지원-범위">지원 범위</a> ·
+  <a href="https://github.com/z8086486/account-dock/issues">버그 제보</a>
+</p>
 
-macOS에서 AI 서비스의 계정과 로그인 상태를 한곳에서 관리하기 위한 앱입니다.
+![Account Dock 계정 관리 화면](assets/accounts.png)
 
-ChatGPT 앱에는 개인 계정, VS Code 확장에는 업무 계정을 사용하는 것처럼, 사용 환경별로 계정을 확인하고 전환하는 것을 목표로 합니다. 현재는 **OpenAI ChatGPT·Codex를 대상으로 개발 중인 초기 시제품**이며, 향후 **Anthropic Claude 등 다른 AI 서비스**도 지원할 예정입니다.
+> 개발 프리뷰입니다. 화면의 계정과 사용량은 설명용 예시입니다. Account Dock은 OpenAI·Anthropic과 제휴하지 않은 독립 프로젝트입니다.
 
-> 현재 버전은 Codex 공유 인증 저장소의 계정 조회, 로그인·로그아웃, Keychain 계정 저장·적용을 제공합니다. 0.7.0부터 별도 VS Code 인스턴스에 저장한 계정을 적용하는 실험 기능을 제공합니다. 기존 VS Code 창의 계정을 그대로 교체하는 기능과 실제 세션 자동 검증은 아직 지원하지 않습니다.
+## 주요 기능
 
-## 현재 기능
+- **계정을 한곳에** — 브라우저 로그인으로 계정을 추가하고, 이름을 지정해 macOS Keychain에 저장합니다.
+- **VS Code 전용 창** — 기존 VS Code 계정은 유지하면서 다른 계정의 독립 창을 엽니다. 기본 프로필의 테마와 로컬 대화 기록을 연결합니다.
+- **사용량 확인** — Codex 사용 한도와 초기화 시각, 제공되는 크레딧 정보를 계정별로 확인합니다. 계정 추가·메뉴 진입 시 자동으로 병렬 조회합니다.
+- **작업 중 변경 방지** — 전용 창이 실행 중이면 인증을 교체하지 않습니다. 인증이 만료되거나 검증에 실패한 경우에도 변경을 중단합니다.
+- **앱 내 업데이트** — GitHub에 공개된 업데이트의 서명을 확인하고, 다운로드·앱 교체·재실행을 진행합니다.
 
-- SwiftUI 관리 창에서 Codex 로컬 계정의 이메일과 플랜 조회
-- ChatGPT·VS Code의 실행 프로세스별 인증 저장소 계정 표시
-- 설치된 Codex 확장 버전과 실행 중 버전 구분
-- 별도 임시 인증 폴더에서 브라우저 로그인으로 계정 추가 및 공유 저장소 로그아웃
-- 현재 로그인 계정을 Keychain에 자동 등록하고 이름 지정·선택·삭제
-- 계정별 Codex 남은 한도 비율, 초기화 시각, 크레딧·한도 초기화 보상 및 누적 사용 토큰 표시
-- 첫 실행 접근 설정 화면과 로그인 폴더 선택·Keychain 바로가기
-- 저장한 계정 적용 전 현재 계정 자동 백업 및 실행 중인 앱 변경 차단
-- 하늘색·오렌지·짙은 남색의 전용 UI, 커스텀 버튼과 독자 제작 앱 아이콘
-- Account Dock, ChatGPT, Codex의 설치 버전·최신 버전·검증 범위 표시
-- **계정 관리:** 앱별 현재 연결 계정과 저장 계정 선택. VS Code 전용 창 전환은 실험 기능
-- 공식 CLI를 이용한 Codex 확장 업데이트
-- 명령줄에서 앱 설치 여부 및 Codex 인증 상태 확인
-- 지정한 `CODEX_HOME`의 인증 상태 조회
-- 명령줄 출력의 이메일 기본 숨김, 인증 토큰 출력 제외
+## 설치
 
-조회 결과는 지정된 로컬 인증 저장소를 기준으로 합니다. 실행 중인 VS Code 확장의 계정과 일치하는지, 서버에서 세션이 유효한지는 별도로 확인해야 합니다. 앱별 카드도 실행 중 세션을 직접 조회한 결과는 아닙니다. 아래 조회 범위를 확인하세요.
+**macOS 14 이상 · Apple Silicon(M 시리즈)**
 
-## 지원 현황
+1. [Releases](https://github.com/z8086486/account-dock/releases)에서 최신 `arm64-preview.dmg`를 다운로드합니다.
+2. DMG를 열고 **Account Dock.app**을 Applications 폴더로 옮깁니다.
+3. 앱을 실행하고 첫 접근 안내를 완료합니다.
 
-| 대상 | 현재 상태 | 예정 기능 |
-| --- | --- | --- |
-| OpenAI Codex · VS Code | 실행 프로세스의 인증 저장소 조회·공유 인증 관리 | 실행 중 세션 대조 및 독립 계정 연결 |
-| OpenAI ChatGPT · macOS 앱 | 실행 프로세스의 인증 저장소 조회 | 실제 세션 대조 및 독립 전환 |
-| Anthropic Claude | 미지원 | 인증 연동 조사 후 지원 추가 |
-| 기타 AI 서비스 | 미지원 | 서비스별 연동 방식에 따라 확장 |
+공식 ChatGPT 앱 또는 VS Code의 공식 Codex 확장(`openai.chatgpt`)에 포함된 로컬 Codex 실행 파일이 필요합니다. VS Code 전용 창 기능에는 `/Applications`에 설치된 Visual Studio Code와 Codex 확장이 필요합니다. 앱 실행에 Python이나 Xcode는 필요하지 않습니다. Intel용 설치 파일은 아직 제공하지 않습니다.
 
-각 서비스의 공식 인증 방식과 실제 앱 동작을 확인하며 지원 범위를 늘릴 예정입니다. 계정 분리는 검증을 마친 환경부터 제공할 계획입니다.
-
-## 실행 환경
-
-- macOS 14 이상
-- 공식 ChatGPT 앱 또는 로컬 VS Code의 공식 Codex 확장 (`openai.chatgpt`)
-- 소스 빌드에만 Swift 6.0 이상과 Xcode 또는 Command Line Tools 필요
-- 패키징·개발용 진단 도구에만 Python 3 사용. **0.6.0 앱 실행에는 Python이 필요하지 않습니다.**
-
-현재 진단 도구는 `~/.vscode/extensions`에서 확장에 포함된 Codex 실행 파일을 찾습니다. 다른 설치 경로는 CLI의 `--binary` 옵션으로 지정할 수 있습니다. 로컬 `.app`/`.dmg` 패키징을 지원합니다. Apple Silicon용 프리뷰를 [GitHub Releases](https://github.com/z8086486/account-dock/releases)에서 제공합니다. 정식 배포본은 아닙니다.
-
-## 무료 프리뷰 설치·업데이트
-
-[GitHub Releases](https://github.com/z8086486/account-dock/releases)에서 Apple Silicon용 DMG를 다운로드하세요. macOS 14 이상과 공식 Codex 실행 파일이 필요하며, Intel용 바이너리는 아직 제공하지 않습니다.
-
-앱의 **버전 · 업데이트 → 업데이트 확인 → 프리뷰 다운로드**에서도 새 버전을 확인하고 브라우저로 DMG를 내려받을 수 있습니다. Account Dock을 종료한 뒤 DMG 안의 앱을 기존 설치 위치에 교체하세요. 기존 설치가 `~/Applications`에 있다면 같은 위치를 사용해 중복 설치를 피하세요. 저장 계정은 Keychain에 유지됩니다.
-
-이 방식은 유료 개발자 등록 없이 제공하는 ad-hoc 서명 프리뷰입니다. Apple 공증·자동 앱 교체는 제공하지 않습니다. macOS 실행 확인과 Keychain 접근 요청이 발생할 수 있으며, 보안 설정을 자동으로 변경하지 않습니다. 릴리즈에 SHA256SUMS를 함께 제공합니다.
+프리뷰는 Apple 공증을 받지 않았으므로 macOS가 실행 확인을 요구하거나 차단할 수 있습니다. 업데이트 서명과 Apple 공증은 별개이며, 앱은 시스템 보안 설정을 자동으로 변경하지 않습니다.
 
 ## 시작하기
+
+1. **계정 추가**에서 브라우저로 로그인합니다. 기존 앱의 로그인은 유지됩니다. 읽을 수 있는 현재 공유 Codex 계정은 자동 등록됩니다.
+2. **저장한 계정 → 이름 변경**에서 개인용·업무용처럼 구분하기 쉬운 이름을 지정합니다.
+3. **계정 관리 → VS Code · Codex**에서 사용할 계정을 선택하고 **선택한 계정으로 전용 창 열기**를 누릅니다.
+4. 전용 VS Code의 Codex 설정에서 실제 로그인 계정을 확인합니다.
+
+기존·전용 VS Code에 이미 연결된 계정은 선택 후보에서 제외됩니다. 다른 계정으로 전용 창을 열려면 먼저 기존 전용 창의 작업을 저장하고 종료하세요.
+
+테마는 기본 프로필에서 가져오며, 로컬 대화의 추가·이름 변경·보관은 기존 창과 전용 창 양쪽에 반영됩니다. 같은 대화에서 동시에 작업하지 마세요. 전체 설정과 MCP 인증까지 복사하지는 않습니다. [전용 창 동작 자세히 보기 →](ISOLATION.md)
+
+## 저장한 계정과 사용량
+
+![저장한 계정과 Codex 사용량](assets/saved-accounts.png)
+
+계정별 이름 편집·삭제와 사용량 조회를 제공합니다. 계정을 목록에서 삭제해도 현재 앱에서 로그아웃되지는 않습니다. 메뉴를 다시 누르면 해당 화면의 정보가 새로고침됩니다.
+
+표시되는 한도는 **Codex 기준**입니다. ChatGPT 전체 대화 한도나 API 결제 잔액을 의미하지 않습니다. 계정에서 크레딧 수치를 제공하지 않으면 잔액을 추정하지 않고 제공된 상태만 표시합니다. 인증이 만료되면 해당 계정을 다시 추가해 로그인하세요.
+
+## 업데이트
+
+![버전과 앱 업데이트](assets/updates.png)
+
+**버전 · 업데이트 → 앱 업데이트**에서 새 버전을 확인하고 설치합니다. Sparkle이 서명된 피드와 업데이트 파일을 검증한 뒤 기존 앱을 교체하고 다시 실행합니다. 계정 작업 중에는 재실행을 미룹니다.
+
+- **0.9.4 및 이전 버전:** 앱 내 설치 기능이 없어 최신 DMG로 한 번 직접 교체해야 합니다. 기존 설치 위치가 `~/Applications`라면 같은 위치를 사용하세요.
+- **저장 계정:** 앱 외부의 Keychain에 유지됩니다. 프리뷰 서명이 바뀌면 macOS가 접근 허용을 다시 요청할 수 있습니다.
+- **외부 도구:** Codex 확장은 공식 VS Code 설치 도구로 업데이트합니다. ChatGPT 앱은 공식 앱의 업데이트 기능을 사용합니다. 새 버전의 호환성을 자동으로 보장하지는 않습니다.
+
+## 지원 범위
+
+| 대상 | 현재 지원 |
+| --- | --- |
+| VS Code · Codex | 로컬 인증 저장소 조회, 저장 계정 관리, 독립 전용 창, 테마·로컬 대화 연결 |
+| ChatGPT · macOS | 설치 버전과 내부 Codex 저장소의 참고 정보 표시. **앱 자체 로그인 조회·전환은 미지원** |
+| Anthropic Claude | 향후 지원 예정. 인증 연동 방식 조사 후 추가 |
+
+앱별 계정 표시는 **로컬 인증 저장소 기준**이며 실행 중 세션을 직접 확인한 결과는 아닙니다. 현재는 로컬·파일 방식 Codex 인증을 지원합니다. API 키, Codex의 Keychain/auto 인증 저장 방식, 원격 SSH·WSL 환경은 저장 계정 전환 대상이 아닙니다. 깨끗한 Mac과 모든 지원 macOS 버전에서의 설치 검증은 아직 완료하지 않았습니다.
+
+## 개인정보와 접근
+
+인증 정보는 이 Mac의 Keychain에 저장하며 GitHub로 업로드하지 않습니다. 온라인 사용량 조회는 저장한 계정으로 OpenAI에 인증해 요청하며, **접근 및 개인정보**에서 끌 수 있습니다. 현재 기능에는 전체 디스크 접근·화면 기록·손쉬운 사용 권한이 필요하지 않습니다.
+
+첫 실행에 필요한 접근과 이유를 안내합니다. Keychain 요청에서 **항상 허용**을 선택하면 이후 접근에도 적용되지만, 서명 변경·Keychain 잠금·권한 철회 시에는 다시 확인이 필요할 수 있습니다.
+
+## 개발
+
+Swift 6 이상과 Xcode 또는 Command Line Tools가 필요합니다.
 
 ```sh
 git clone https://github.com/z8086486/account-dock.git
@@ -62,152 +95,12 @@ cd account-dock
 swift run AccountDock
 ```
 
-개발 프리뷰는 빌드 서명이 바뀌면 macOS가 기존 Keychain 항목 접근을 다시 요청할 수 있습니다. 앱에 ‘Keychain 접근 응답을 기다리고 있습니다’가 보이면 macOS 접근 창을 확인하세요. 암호가 필요하면 OS 창에 직접 입력하며, Account Dock은 암호를 받지 않습니다.
-
-처음 실행하면 접근 설정 화면이 열립니다. 로그인 정보와 Keychain이 필요한 이유를 확인하고 **접근 확인 → 시작하기**를 누르세요. 로그인 폴더를 직접 선택하거나 Keychain 앱을 열 수 있습니다. 전체 디스크 접근·화면 기록·손쉬운 사용 권한은 요청하지 않습니다. 온라인 사용량 조회는 선택 사항이며 **접근 및 개인정보**에서 끌 수 있습니다.
-
-1. 현재 계정이 **저장한 계정**에 자동 등록됩니다. **계정 이름 지정**으로 개인용·업무용처럼 이름을 바꿀 수 있습니다. 같은 이메일과 계정 ID는 중복 등록하지 않고 인증 정보를 갱신하며, 정한 이름은 유지합니다.
-2. **계정 추가 → 브라우저에서 로그인**으로 새 계정을 등록합니다. 현재 ChatGPT·VS Code 로그인은 바꾸지 않으며, 추가된 인증은 Keychain에 보관합니다. 취소·시간 초과 시 임시 프로세스와 폴더를 정리합니다.
-3. **저장한 계정 → 공유 인증 관리 · 고급 → 공유 계정 전환**을 선택하면 저장한 액세스 토큰의 유효성을 온라인으로 확인한 뒤 공유 저장소에 적용합니다. 만료되거나 확인에 실패하면 기존 인증을 유지합니다. 공유 저장소의 현재 계정은 먼저 Keychain에 자동 백업합니다.
-4. **로그아웃**은 공유 저장소의 로그인 정보를 제거합니다. 별도로 저장한 계정은 목록에서 삭제할 수 있습니다.
-
-공유 저장소 로그아웃·계정 적용 시 ChatGPT와 VS Code를 먼저 종료해야 합니다. 전용 VS Code 전환은 전용 인스턴스만 종료하면 됩니다. 계정 추가는 종료 없이 가능합니다. 작업 중인 앱은 자동으로 종료하지 않습니다. 다른 Codex CLI 세션도 종료한 후 전환하세요. 실행 중인지 불확실하면 전환하지 않습니다. 변경 직전 프로세스와 인증 파일을 다시 확인하며, 다른 Account Dock의 동시 전환도 잠금으로 차단합니다. 외부 앱은 이 잠금에 참여하지 않으므로 전환하는 동안 새 작업을 시작하지 마세요. 인증 저장소를 공유하는 모든 클라이언트에 영향이 있을 수 있으며, 앱을 다시 실행한 후 실제 계정을 확인해야 합니다.
-
-저장한 계정은 파일 방식 인증(`cli_auth_credentials_store = "file"` 또는 기본 설정)의 ChatGPT 계정에 한해 지원합니다. Keychain/auto 방식의 Codex 인증 저장소나 API 키 계정은 현재 저장한 계정 대상이 아닙니다. 저장된 인증이 만료·취소된 경우 재로그인이 필요하며, 영구적인 무인 로그인은 보장하지 않습니다.
-
-### 개발용 명령줄 진단 (Python 필요)
-
 ```sh
-# 이메일을 숨긴 상태로 조회
-python3 scripts/doctor.py
-
-# 이메일을 포함해 조회
-python3 scripts/doctor.py --show-email
-
-# 특정 인증 저장소 조회
-python3 scripts/doctor.py --codex-home /absolute/path/to/codex-home
-
-# Codex 실행 파일 직접 지정
-python3 scripts/doctor.py --binary /absolute/path/to/codex
-```
-
-인증 저장소는 `--codex-home`, 현재 프로세스의 `CODEX_HOME`, `~/.codex` 순서로 결정합니다. 실행 중인 VS Code 프로세스의 환경을 자동으로 감지하지는 않습니다.
-
-| 상태 | 의미 |
-| --- | --- |
-| `cached_account` | 로컬 저장소에서 계정 정보를 읽음. 세션 유효성을 보장하지 않음 |
-| `signed_out` | 해당 저장소에서 계정 정보가 반환되지 않음 |
-| `unavailable` | Codex 실행 파일을 찾지 못함 |
-| `error` | 조회 실패. 로그아웃 상태와 구분됨 |
-
-## VS Code만 다른 계정 사용하기
-
-**계정 관리 → VS Code · Codex**에서 저장한 계정을 선택하고 **선택한 계정으로 전용 창 열기**를 누르세요. `Account Dock` 제목의 별도 VS Code 창이 열립니다. ChatGPT와 기존 VS Code 계정은 유지합니다. 기본 프로필의 테마를 가져오고 로컬 대화 기록을 연결합니다. 인증은 별도로 유지하지만 대화 추가·이름 변경·보관은 양쪽에 반영됩니다. 같은 대화에서 동시에 작업하지 마세요. 전체 설정·MCP 인증은 복사하지 않습니다. 다음 전환 전에는 전용 VS Code를 종료해야 합니다. 자세한 동작과 한계는 [VS Code 분리 안내](ISOLATION.md)를 확인하세요.
-
-ChatGPT 카드는 앱 로그인 미확인 상태와 참고용 Codex 저장소 정보를 구분합니다. 앱 로그인 전환을 대신하던 공유 인증 버튼은 제거했습니다. 실제 앱 연동 단계와 완료 기준은 [ChatGPT 연동 계획](CHATGPT_INTEGRATION.md)을 참고하세요. VS Code 카드는 기존 계정을 유지하는 **독립 전용 창**만 제공합니다. 테마·로컬 대화 연결은 창을 열 때 자동으로 처리합니다. 공유 전환은 영향을 받는 앱과 작업 프로세스를 종료해야 합니다. 공유 저장소 변경은 **저장한 계정 → 공유 인증 관리 · 고급**에 별도로 둡니다.
-
-## 앱별 계정 조회 범위
-
-**계정 관리**의 ChatGPT·VS Code 카드는 각 앱에 직접 연결된 로컬 Codex 프로세스를 식별하고, 그 프로세스의 `CODEX_HOME` 또는 `HOME`에서 인증 폴더를 구합니다. Account Dock에서 선택한 공유 폴더를 두 앱에 일괄 대입하지 않습니다. 인증 파일의 이메일과 플랜만 읽으며 로그인을 변경하지 않습니다.
-
-인증 저장소 설정을 명시적으로 재정의한 프로세스/설정 파일은 보수적으로 미지원 처리합니다.
-
-현재 지원 경로는 `/Applications/ChatGPT.app`, `/Applications/Visual Studio Code.app`와 기본 `~/.vscode/extensions` 아래 공식 Codex 확장입니다. 여러 로컬 창이 서로 다른 폴더나 확장 버전을 쓰면 각각 표시합니다. 앱 종료·프로세스 접근 불가·미지원 인증 방식에서는 계정을 추정하지 않습니다.
-
-**이 값은 파일에 저장된 계정이며 앱의 메모리 세션은 미검증입니다.** 실행 중인 앱이 외부 토큰을 사용하거나 인증 파일과 다른 세션을 유지할 수 있습니다. 전용 VS Code 분리 기능과 별개로 실제 세션을 자동 대조하는 연동은 추가로 필요합니다. 원격 SSH·WSL·사용자 지정 설치 경로는 아직 지원하지 않습니다.
-
-## 계정별 사용량
-
-**사용량 확인**은 저장한 각 계정의 Codex 한도와 사용량을 공식 app-server로 조회합니다. 계정을 전환하지 않고 별도 임시 프로세스의 메모리 인증으로 조회합니다.
-
-- **남은 한도 % / 초기화 시각:** 서버가 반환한 시간별·주간 등의 한도 구간을 그대로 표시합니다. 플랜별로 제공되는 구간이 다를 수 있습니다.
-- **크레딧:** 서버가 반환한 잔액 또는 무제한 여부를 표시합니다. 크레딧은 있지만 수치가 없으면 ‘크레딧 있음 · 잔액 미제공’, 잔액 정보를 확인할 수 없으면 수치를 표시하지 않습니다. 0으로 추정하지 않습니다.
-- **한도 초기화 보상:** 사용할 수 있는 횟수를 별도로 표시합니다. 일반 크레딧 잔액에 합산하거나 자동 사용하지 않습니다.
-- **누적 사용 토큰:** 서버가 반환하는 사용 이력입니다. 남은 토큰 수나 결제 금액이 아닙니다.
-- 정확한 남은 토큰 개수, ChatGPT 채팅 전체 한도는 제공하지 않습니다. 응답이 없으면 0으로 추정하지 않습니다.
-- 저장한 액세스 토큰이 만료되면 재로그인이 필요하다고 표시합니다. 사용량 조회를 위해 다른 계정의 리프레시 토큰을 갱신하지 않습니다.
-
-온라인 조회를 켜면 저장한 계정의 액세스 토큰을 **OpenAI 인증에 사용**합니다. 토큰은 하위 프로세스의 표준 입력으로 전달하며 명령줄 인자·환경 변수·화면에 표시하지 않습니다. 임시 Codex 홈과 메모리 인증 저장소를 사용하고 종료 후 임시 폴더를 삭제합니다. 정상 종료 때 임시 폴더가 정리되며, 비정상 종료 시 임시 진단 파일이 남을 수 있습니다. 실제 기본 로그인 파일을 변경하지 않는 것을 확인했습니다.
-
-한 계정의 실시간 조회를 검증했습니다. 여러 실제 계정의 동시 유효성 및 만료 후 복구는 추가 검증 대상입니다. [공식 app-server 문서](https://learn.chatgpt.com/docs/app-server)의 실험 API 변경에 따라 표시 기능이 달라질 수 있습니다.
-
-## 인증 정보 처리
-
-계정 조회는 Codex app-server의 `account/read`를 `refreshToken: false`로 호출합니다. 조회 시에는 로그인·로그아웃이나 토큰 갱신을 요청하지 않습니다. 로그인·로그아웃은 사용자가 해당 버튼을 눌렀을 때 공식 app-server 메서드를 호출합니다. 저장한 계정 저장 시에는 인증 파일을 읽어 Keychain에 보관하고, 선택 시 인증 파일을 원자적으로 교체하며 파일 권한을 0600으로 설정합니다. Codex app-server 자체는 로컬 로그나 상태 파일을 생성할 수 있습니다.
-
-명령줄에서는 이메일을 기본적으로 숨기고, 관리 창에서는 계정 구분을 위해 표시합니다. 인증 토큰과 원본 서버 오류는 출력하지 않습니다. 계정 정보가 보이는 화면이나 진단 결과를 공유할 때는 개인정보를 확인하세요.
-
-OpenAI 로고나 공식 앱 아이콘을 사용하지 않으며, Account Dock은 OpenAI 또는 Anthropic의 공식 제품이 아닙니다. 서비스 이름은 연동 대상을 설명하기 위해 사용합니다. 레이싱 스타일의 색상과 계정 카드 아이콘은 독자적으로 구성했으며, Porsche/Gulf 로고나 차량 이미지를 앱에 포함하지 않습니다.
-
-## 버전 및 업데이트
-
-**버전 · 업데이트** 화면에서 설치된 버전과 공식 최신 버전을 확인할 수 있습니다. 확인한 호환 버전과 기능 범위를 함께 표시하며, 새 버전은 재검증 대상으로 표시합니다.
-
-- **Account Dock:** GitHub Releases 조회와 Sparkle 자체 업데이트 기반을 연결했습니다. 현재 프리뷰의 앱 내 설치는 비활성화되어 있으며, 서명 키와 첫 배포본을 준비한 뒤 활성화합니다.
-- **Codex 확장:** 공식 Marketplace의 안정 버전을 확인하고, 사용자가 선택한 업데이트를 VS Code 공식 CLI로 설치합니다. 실제 새 버전 설치는 아직 수행하지 않았습니다.
-- **ChatGPT:** 설치 버전과 공식 피드 조회 상태를 표시합니다. 피드가 접근을 제한하면 최신 버전을 확정하지 않습니다. 설치는 공식 앱의 업데이트 기능이나 공식 다운로드 경로를 사용합니다.
-
-앱에서 외부 도구를 업데이트했다고 호환성이 자동으로 검증되는 것은 아닙니다. 지원 범위를 확인하고 진행해 주세요.
-
-## APP / DMG 배포 준비
-
-```sh
-python3 scripts/package_app.py --dmg --install
-```
-
-`dist/`에 현재 Mac 아키텍처용 ZIP, DMG와 체크섬을 생성하고 `--install`로 최신 앱을 `~/Applications/Account Dock.app`에 설치합니다. 이전 로컬 설치 및 프로젝트의 `.local/`·`dist/`에 있는 확인된 Account Dock 앱 사본을 정리합니다. 계정 파일·Keychain과 ZIP/DMG는 유지합니다. 패키지만 만들 때는 `--install`을 생략하세요. 다른 이름으로 복사하거나 별도 폴더에 수동 설치한 앱은 정리 대상이 아닙니다. 앱 실행에는 Python이 필요하지 않으며 공식 Codex 실행 파일을 사용합니다. 깨끗한 Mac 설치는 아직 검증하지 않았습니다. 자동 업데이트 및 정식 배포에 필요한 서명·공증, GitHub Releases 운영 절차는 [RELEASING.md](RELEASING.md)에 정리했습니다.
-
-GitHub Actions의 **Build macOS preview**는 수동으로 실행할 수 있으며, 공개 릴리즈 대신 테스트용 Artifact를 생성합니다.
-
-## 개발
-
-```sh
-swift build
 swift test
 python3 -m unittest discover -s tests -v
+python3 scripts/package_app.py --dmg
 ```
 
-```text
-Package.swift                   Swift 패키지 설정
-Sources/AccountDock/AccountDockApp.swift  macOS 관리 창 및 동작 연결
-Sources/AccountDock/AccountStore.swift  Keychain 계정 저장·복원
-Sources/AccountDock/Setup.swift 첫 실행 접근 설정
-Sources/AccountDock/CodexService.swift  공식 app-server Swift 연결
-Sources/AccountDock/SwitchSafety.swift  실행 중 보호 및 인증 파일 전환
-Sources/AccountDock/VSCodeIsolation.swift 전용 VS Code 연결
-Sources/AccountDock/VSCodeEnvironment.swift 외관 설정 및 로컬 대화 연결
-Sources/AccountDock/AppAccounts.swift   앱별 인증 저장소 조회
-Sources/AccountDock/Usage.swift 계정별 한도·크레딧 조회 및 화면
-Sources/AccountDock/VersionService.swift 버전 조회·확장 업데이트
-scripts/usage.py                개발용 사용량 진단
-scripts/install_local.py        최신 앱 단일 로컬 설치
-scripts/release_preflight.py    서명·공증 준비 상태 확인
-scripts/generate_icon.swift     원본 아이콘 생성
-scripts/doctor.py               Codex 계정 진단
-tests/test_doctor.py            인증 프로토콜·계정 응답 테스트
-tests/AccountDockTests/         프로토콜·충돌·만료·Keychain 테스트
-```
+Python은 개발용 테스트·패키징에만 사용합니다. 공개 저장소에는 제품 소스·테스트·문서·화면 이미지·업데이트 피드만 포함하며, 인증 정보와 로컬 작업 기록은 제외합니다.
 
-`.gitignore`는 공개할 소스·테스트·설정·README 파일만 허용합니다. 새 파일을 추가할 때는 공개 대상인지 확인하고 허용 목록을 갱신해 주세요. 로컬 작업 기록, 인증 정보, 로그, 빌드 결과물은 저장소에 포함하지 않습니다.
-
-정식 배포까지 필요한 기능·검증·서명·업데이트 작업과 완료 조건은 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)에 정리했습니다.
-
-## 개발 방향
-
-- OpenAI 앱·확장의 실제 계정 상태와 인증 공유 범위 검증
-- 앱별 독립 로그인·로그아웃과 계정 전환 검증
-- 서비스별 연동 모듈을 분리해 Anthropic Claude 등 추가
-- 메뉴 막대 지원, 깨끗한 Mac 설치 및 서명·공증된 정식 배포
-- 이전 배포본에서 새 배포본으로의 실제 자체 업데이트 검증
-
-현재는 OpenAI 연동을 검증하는 단계입니다. Claude 및 기타 서비스 지원 일정은 아직 정하지 않았습니다.
-
-### 사용량 자동 조회 (0.9.0)
-
-계정 추가 완료 후와 저장한 계정 화면 진입 시 사용량을 자동 조회합니다. 최대 네 계정을 병렬 조회하고 응답이 끝난 순서대로 표시합니다. 한 계정 오류가 다른 결과를 막지 않으며 중복 새로고침은 합쳐집니다. 온라인 조회를 끈 경우 자동 조회도 수행하지 않습니다.
-
-### 계정 이름과 새로고침
-
-저장한 계정의 **이름 변경**에서 원하는 이름을 지정할 수 있습니다. 인증 정보는 유지됩니다. 전용 VS Code 계정 후보에서는 기존·전용 VS Code에 연결된 계정을 모두 제외합니다. 메뉴를 다시 누르면 계정 관리의 연결 상태, 저장한 계정의 목록·사용량, 버전 메뉴의 업데이트 정보, 접근 메뉴의 접근 상태를 다시 확인합니다.
-
-첫 실행의 접근 안내에서 실제 저장 계정의 Keychain 접근과 로그인 폴더 읽기를 확인합니다. 완료한 안내는 다음 실행에서 생략합니다. macOS Keychain 요청에서는 **항상 허용**을 선택해야 이후 접근 허용이 유지됩니다. 개발 프리뷰의 서명 변경·Keychain 잠금·권한 철회 후에는 다시 요청될 수 있으며, 앱이 이를 자동 승인하지 않습니다. 업데이트 간 권한 유지는 동일 Developer ID 서명으로 배포한 뒤 검증해야 합니다.
+[배포 가이드](RELEASING.md) · [지원·검증 체크리스트](RELEASE_CHECKLIST.md) · [ChatGPT 연동 계획](CHATGPT_INTEGRATION.md)

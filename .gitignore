@@ -99,3 +99,15 @@ __pycache__/
 !/Sources/AccountDock/VSCodeEnvironment.swift
 
 !/CHATGPT_INTEGRATION.md
+
+# Public product images and signed update feeds.
+!/assets/
+/assets/*
+!/assets/icon.png
+!/assets/accounts.png
+!/assets/saved-accounts.png
+!/assets/updates.png
+!/updates/
+/updates/*
+!/updates/appcast-arm64.xml
+!/scripts/generate_update_feed.py

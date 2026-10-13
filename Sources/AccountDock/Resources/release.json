@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "version": "0.9.4",
-  "build": 20,
+  "version": "0.9.6",
+  "build": 22,
   "channel": "preview",
   "minimumMacOS": "14.0",
   "repository": "z8086486/account-dock",
@@ -18,5 +18,6 @@
       ],
       "scope": "계정·사용량 조회 확인 · 독립 전환은 미검증"
     }
-  }
+  },
+  "updatePublicKey": "8U1BAw4B1o36OoipJQztN62rH4VAfYVqgAu5AQy9L0A="
 }

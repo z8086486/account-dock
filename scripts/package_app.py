@@ -13,7 +13,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / 'Sources/AccountDock/Resources/release.json'
-FEED = 'https://github.com/z8086486/account-dock/releases/latest/download/appcast.xml'
+FEED = 'https://raw.githubusercontent.com/z8086486/account-dock/main/updates/appcast-{architecture}.xml'
 
 
 def run(*args):
@@ -29,16 +29,17 @@ def main():
     parser.add_argument('--notary-profile')
     parser.add_argument('--sparkle-public-key')
     args = parser.parse_args()
-    signed = all([args.signing_identity, args.notary_profile, args.sparkle_public_key])
-    if any([args.signing_identity, args.notary_profile, args.sparkle_public_key]) and not signed:
-        parser.error('Release signing requires identity, notary profile, and Sparkle public key together.')
-    if signed:
+    release = json.loads(MANIFEST.read_text())
+    public_key = args.sparkle_public_key or release.get('updatePublicKey')
+    signed = bool(args.signing_identity and args.notary_profile)
+    if bool(args.signing_identity) != bool(args.notary_profile):
+        parser.error('Developer ID packaging requires both signing identity and notary profile.')
+    if public_key:
         try:
-            if len(base64.b64decode(args.sparkle_public_key, validate=True)) != 32:
+            if len(base64.b64decode(public_key, validate=True)) != 32:
                 raise ValueError()
         except ValueError:
             parser.error('Sparkle public key must be a base64-encoded 32-byte Ed25519 key.')
-    release = json.loads(MANIFEST.read_text())
     run('swift', 'build', '-c', args.configuration)
     binary_dir = Path(subprocess.check_output(['swift', 'build', '-c', args.configuration, '--show-bin-path'], cwd=ROOT, text=True).strip())
     destination = ROOT / 'dist' / f"{release['version']}-{platform.machine()}"
@@ -66,10 +67,10 @@ def main():
             'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': release['version'],
             'CFBundleVersion': str(release['build']), 'LSMinimumSystemVersion': release['minimumMacOS'],
             'NSHighResolutionCapable': True, 'CFBundleIconFile': 'AppIcon'}
-    if signed:
-        info.update({'SUFeedURL': FEED, 'SUPublicEDKey': args.sparkle_public_key,
+    if public_key:
+        info.update({'SUFeedURL': FEED.format(architecture=platform.machine()), 'SUPublicEDKey': public_key,
                      'SUEnableAutomaticChecks': False, 'SUAutomaticallyUpdate': False,
-                     'SUVerifyUpdateBeforeExtraction': True})
+                     'SUVerifyUpdateBeforeExtraction': True, 'SURequireSignedFeed': True})
     (contents / 'Info.plist').write_bytes(plistlib.dumps(info))
     if signed:
         # Sign Sparkle's nested code inside-out, then the enclosing application.

@@ -351,6 +351,7 @@ struct Dashboard: View {
         }
         .foregroundStyle(ink).tint(accent).preferredColorScheme(.light)
         .frame(minWidth: 1020, minHeight: 780)
+        .onAppear { updates.canRestart = { !model.busy && !model.refreshingUsage } }
         .task {
             if setupCompleted { await start() } else { showSetup = true }
         }
