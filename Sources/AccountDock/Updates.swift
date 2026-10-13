@@ -18,7 +18,7 @@ struct ProductVersion: Decodable, Identifiable {
     let scope: String
     let known_version: Bool
     let update_available: Bool
-    var name: String { switch id { case "accountdock": "Account Dock"; case "chatgpt": "ChatGPT"; default: "VS Code · Codex" } }
+    var name: String { switch id { case "accountdock": "Account Dock"; default: "VS Code · Codex" } }
     var latestLabel: String {
         if let latest { return latest }
         switch check { case "not_released": return "첫 릴리즈 준비 중"; case "unavailable": return "확인할 수 없음"; default: return "아직 확인 안 함" }
@@ -119,7 +119,7 @@ struct UpdatePanel: View {
                         Text(product.name).font(.system(size: 16, weight: .semibold))
                         Spacer()
                         Text(product.update_available ? "UPDATE AVAILABLE" : product.id == "accountdock" ? (product.check == "checked" ? "최신" : "확인 전") : product.known_version ? "OBSERVED" : "NOT VERIFIED")
-                            .font(.system(size: 9, weight: .bold)).tracking(1)
+                            .font(.system(size: 12, weight: .bold)).tracking(1)
                             .padding(.horizontal, 10).padding(.vertical, 6)
                             .background(product.update_available ? DockTheme.orange.opacity(0.18) : DockTheme.blue.opacity(0.35), in: Capsule())
                     }
@@ -139,7 +139,7 @@ struct UpdatePanel: View {
                                 Text(product.scope)
                                 if !product.known_version { Text("현재 버전은 호환성 재확인이 필요합니다.").foregroundStyle(Color(red: 0.65, green: 0.24, blue: 0.08)) }
                             }
-                        }.font(.system(size: 10)).foregroundStyle(DockTheme.muted)
+                        }.font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                         Spacer()
                         if product.id == "accountdock" {
                             if center.selfUpdateReady {
@@ -151,9 +151,6 @@ struct UpdatePanel: View {
                         } else if product.id == "codex" {
                             Button("확장 업데이트") { pending = product; showConfirm = true }.buttonStyle(DockButtonStyle())
                                 .disabled(!product.update_available || center.busy)
-                        } else {
-                            Button("공식 업데이트 안내") { NSWorkspace.shared.open(URL(string: "https://chatgpt.com/download/")!) }
-                                .buttonStyle(DockButtonStyle())
                         }
                     }
                 }.padding(22).background(.white, in: RoundedRectangle(cornerRadius: 16))
@@ -161,12 +158,10 @@ struct UpdatePanel: View {
             }
             Group {
                 Text("Apple 공증 미적용 · 설치 시 macOS 확인이 필요할 수 있습니다.")
-                    .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                    .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
             }
-            Text("ChatGPT는 공식 앱에서 업데이트하세요.")
-                .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
             if let date = center.checkedAt {
-                Text("마지막 온라인 확인 · \(date.formatted(date: .abbreviated, time: .shortened))").font(.system(size: 10)).foregroundStyle(DockTheme.muted)
+                Text("마지막 온라인 확인 · \(date.formatted(date: .abbreviated, time: .shortened))").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
             }
         }
         .sheet(isPresented: $showConfirm) {
@@ -188,7 +183,7 @@ struct UpdatePanel: View {
     }
     private func version(_ label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(.system(size: 10)).foregroundStyle(DockTheme.muted)
+            Text(label).font(.system(size: 12)).foregroundStyle(DockTheme.muted)
             Text(value).font(.system(size: 16, weight: .medium, design: .monospaced))
         }
     }

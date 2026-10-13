@@ -52,13 +52,51 @@ final class NativeTests: XCTestCase {
         XCTAssertEqual(results["1"]?.status, "unavailable")
         XCTAssertEqual(results["4"]?.status, "available")
     }
-    func testConnectionGroupingAndExcludingConnectedAccounts() {
+    @MainActor func testConnectionGroupingExcludesPrimaryButKeepsDedicatedAccounts() {
         let rows = ["1", "2"].map { AppIdentity(id: $0, product: "codex", status: "stored_account", email: "a@example.com", plan: nil, home: "/shared", version: $0) }
-            + [AppIdentity(id: "3", product: "codex", status: "stored_account", email: "b@example.com", plan: nil, home: "/dedicated", version: "2")]
+            + [AppIdentity(id: "3", product: "codex", status: "stored_account", email: "b@example.com", plan: nil, home: VSCodeIsolation.home.path, version: "2")]
         XCTAssertEqual(AppAccountPresentation.grouped(rows).count, 2)
         XCTAssertEqual(AppAccountPresentation.grouped(rows).first?.version, "1, 2")
         let presets = ["a", "b", "c"].map { AccountPreset(id: $0, name: $0, email: "\($0)@example.com", plan: nil, savedAt: Date(), credential: Data()) }
-        XCTAssertEqual(AppAccountPresentation.choices(presets, accounts: rows).map(\.id), ["c"])
+        XCTAssertEqual(AppAccountPresentation.choices(presets, accounts: rows).map(\.id), ["b", "c"])
+    }
+    @MainActor func testAccountWorkspacesSeparateOrganizationsAndSurviveRenameAndTokenRefresh() throws {
+        func preset(_ account: String, name: String = "", id: String = "a", token: String = "old") -> AccountPreset {
+            let claims = Data(#"{"email":"fixture@example.com"}"#.utf8).base64EncodedString()
+            let data = Data("{\"tokens\":{\"account_id\":\"\(account)\",\"access_token\":\"\(token)\",\"id_token\":\"x.\(claims).x\"}}".utf8)
+            return AccountPreset(id: id, name: name, email: "fixture@example.com", plan: nil, savedAt: Date(), credential: data)
+        }
+        let first = preset("org-one"), second = preset("org-two")
+        let a = VSCodeIsolation.workspace(for: first), b = VSCodeIsolation.workspace(for: second)
+        XCTAssertNotEqual(a.home, b.home)
+        XCTAssertNotEqual(a.userData, b.userData)
+        XCTAssertLessThan(a.userData.appendingPathComponent("1.99-main.sock").path.utf8.count, 104)
+        XCTAssertEqual(a, VSCodeIsolation.workspace(for: preset("org-one", name: "renamed", id: "new-id", token: "renewed")))
+        XCTAssertTrue(VSCodeIsolation.isManagedHome(a.home.path))
+        XCTAssertFalse(VSCodeIsolation.isManagedHome("/tmp/codex"))
+        XCTAssertNoThrow(try VSCodeIsolation.requireMatchingIdentity(preset("org-one", token: "renewed").credential, preset: first))
+        XCTAssertThrowsError(try VSCodeIsolation.requireMatchingIdentity(second.credential, preset: first))
+        XCTAssertThrowsError(try VSCodeIsolation.requireMatchingIdentity(nil, preset: first))
+        XCTAssertFalse(VSCodeIsolation.targetsManagedStore(args: ["--user-data-dir", a.userData.path], environment: ["CODEX_HOME": a.home.path], home: b.home, userData: b.userData))
+    }
+    @MainActor func testPreparingSecondAccountDoesNotChangeFirstAccount() throws {
+        let base = URL(fileURLWithPath: "/private/tmp").appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        addTeardownBlock { try FileManager.default.removeItem(at: base) }
+        let a = VSCodeIsolation.Workspace(root: base.appendingPathComponent("first"))
+        let b = VSCodeIsolation.Workspace(root: base.appendingPathComponent("second"))
+        try VSCodeIsolation.prepare(a, name: "First")
+        let auth = Data("first-account-token".utf8)
+        try auth.write(to: a.home.appendingPathComponent("auth.json"))
+        let settings = try Data(contentsOf: a.userData.appendingPathComponent("User/settings.json"))
+        try VSCodeIsolation.prepare(b, name: "Second")
+        XCTAssertEqual(try Data(contentsOf: a.home.appendingPathComponent("auth.json")), auth)
+        XCTAssertEqual(try Data(contentsOf: a.userData.appendingPathComponent("User/settings.json")), settings)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: b.home.appendingPathComponent("auth.json").path))
+        try VSCodeIsolation.prepare(a, name: "First")
+        let conflicting = VSCodeIsolation.Workspace(root: base.appendingPathComponent("third"), userData: a.userData)
+        XCTAssertThrowsError(try VSCodeIsolation.prepare(conflicting, name: "Third"))
+        XCTAssertTrue(String(decoding: try Data(contentsOf: b.userData.appendingPathComponent("User/settings.json")), as: UTF8.self).contains("Second"))
     }
     @MainActor func testAppearanceImportLimitsScopeAndParsesComments() throws {
         let source = Data(#"{ /* comment */ "workbench.colorTheme":"Fixture", "editor.fontSize":15, "secret":"keep out", }"#.utf8)
@@ -182,10 +220,12 @@ final class NativeTests: XCTestCase {
         XCTAssertTrue(VSCodeIsolation.targetsManagedStore(args: ["app-server"], environment: ["CODEX_HOME": home.path], home: home, userData: user))
         XCTAssertTrue(VSCodeIsolation.targetsManagedStore(args: ["--user-data-dir", user.path], environment: [:], home: home, userData: user))
         XCTAssertTrue(VSCodeIsolation.targetsManagedStore(args: ["--user-data-dir=" + user.path], environment: [:], home: home, userData: user))
-        let environment = VSCodeIsolation.launchEnvironment(["HOME": "/Users/fixture", "CODEX_HOME": "/tmp/shared-codex", "VSCODE_IPC_HOOK_CLI": "existing-window", "OPENAI_API_KEY": "fixture", "ELECTRON_RUN_AS_NODE": "1"], home: home)
+        let environment = VSCodeIsolation.launchEnvironment(["HOME": "/Users/fixture", "CODEX_HOME": "/tmp/shared-codex", "VSCODE_IPC_HOOK_CLI": "existing-window", "VSCODE_IPC_HOOK": "legacy-instance", "VSCODE_PID": "123", "OPENAI_API_KEY": "fixture", "ELECTRON_RUN_AS_NODE": "1"], home: home)
         XCTAssertEqual(environment["CODEX_HOME"], home.path)
         XCTAssertEqual(environment["HOME"], "/Users/fixture")
         XCTAssertNil(environment["VSCODE_IPC_HOOK_CLI"])
+        XCTAssertNil(environment["VSCODE_IPC_HOOK"])
+        XCTAssertNil(environment["VSCODE_PID"])
         XCTAssertNil(environment["OPENAI_API_KEY"])
         XCTAssertNil(environment["ELECTRON_RUN_AS_NODE"])
     }

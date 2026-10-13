@@ -123,19 +123,19 @@ struct AccountUsageView: View {
         VStack(alignment: .leading, spacing: 12) {
             if loading {
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("사용량 확인 중…") }
-                    .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                    .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
             } else if let report {
                 if report.status == "login_required" {
                     Label("사용량 조회를 위해 이 계정으로 다시 로그인해 주세요.", systemImage: "lock.rotation")
-                        .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                        .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 } else if report.windows.isEmpty && report.activity.isEmpty && (report.credits ?? []).isEmpty && report.resetCredits == nil {
                     Text("사용량 정보를 제공받지 못했습니다. 잠시 후 다시 확인해 주세요.")
-                        .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                        .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
                 ForEach(report.windows) { window in
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Text(window.title).font(.system(size: 11))
+                            Text(window.title).font(.system(size: 12))
                             Spacer()
                             Text("\(window.remainingPercent, specifier: "%.0f")% 남음")
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -149,7 +149,7 @@ struct AccountUsageView: View {
                         }.frame(height: 6)
                         if let reset = window.resetsAt {
                             Text("초기화 · \(Date(timeIntervalSince1970: reset).formatted(date: .abbreviated, time: .shortened))")
-                                .font(.system(size: 10)).foregroundStyle(DockTheme.muted)
+                                .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                         }
                     }
                 }
@@ -163,22 +163,22 @@ struct AccountUsageView: View {
                 }
                 if let count = report.resetCredits {
                     HStack { Text("한도 초기화 보상"); Spacer(); Text("\(count)회 남음") }
-                        .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                        .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
                 if (report.credits ?? []).isEmpty && ["available", "partial"].contains(report.status) {
                     Text("크레딧 잔액 · 확인할 수 없음")
-                        .font(.system(size: 10)).foregroundStyle(DockTheme.muted)
+                        .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
                 if let lifetime = report.activity["lifetimeTokens"] {
                     Text("누적 사용 토큰 · \(lifetime.formatted(.number.precision(.fractionLength(0))))")
-                        .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                        .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
                 if let checked = report.checkedAt {
                     Text("확인 · \(Date(timeIntervalSince1970: checked).formatted(date: .omitted, time: .shortened)) · Codex 기준")
-                        .font(.system(size: 9)).foregroundStyle(DockTheme.muted)
+                        .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
             } else {
-                Text("사용량을 아직 확인하지 않았습니다.").font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                Text("사용량을 아직 확인하지 않았습니다.").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
             }
         }
     }

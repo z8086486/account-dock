@@ -44,8 +44,7 @@ enum AppIdentityReader {
         for row in rows {
             let parent = table[row.parent]?.path ?? ""
             let product: String
-            if row.path.hasPrefix(desktop), URL(fileURLWithPath: row.path).lastPathComponent == "codex", parent == desktop + "MacOS/ChatGPT" { product = "chatgpt" }
-            else if row.path.contains("/.vscode/extensions/openai.chatgpt-"), row.path.hasSuffix("/codex"), parent.hasPrefix(editor), parent.contains("Code Helper (Plugin)") { product = "codex" }
+            if row.path.contains("/.vscode/extensions/openai.chatgpt-"), row.path.hasSuffix("/codex"), parent.hasPrefix(editor), parent.contains("Code Helper (Plugin)") { product = "codex" }
             else { continue }
             var home: String?, version: String?, email: String?, plan: String?, status = "unavailable"
             do {
@@ -63,7 +62,7 @@ enum AppIdentityReader {
             let key = [product, home ?? "", version ?? "", status].joined(separator: "|")
             if seen.insert(key).inserted { accounts.append(AppIdentity(id: key, product: product, status: status, email: email, plan: plan, home: home, version: version)) }
         }
-        for product in ["chatgpt", "codex"] where !accounts.contains(where: { $0.product == product }) {
+        for product in ["codex"] where !accounts.contains(where: { $0.product == product }) {
             let root = product == "chatgpt" ? desktop + "MacOS/ChatGPT" : editor + "MacOS/Code"
             accounts.append(AppIdentity(id: product, product: product, status: rows.contains(where: { $0.path == root }) ? "process_unavailable" : "not_running", email: nil, plan: nil, home: nil, version: nil))
         }
@@ -144,31 +143,34 @@ struct AppAccountCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(.system(size: 14, weight: .semibold))
                     Text(installed.map { "설치 버전 · \($0)" } ?? "설치 버전 확인 전")
-                        .font(.system(size: 10)).foregroundStyle(DockTheme.muted)
+                        .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
                 Spacer()
             }
+            Divider().opacity(0.4)
+            HStack(alignment: .top, spacing: 28) {
+            VStack(alignment: .leading, spacing: 16) {
             if accounts.isEmpty {
                 Text("계정 확인 전").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
             }
             if !canSwitch {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("앱 로그인 조회 미지원").font(.system(size: 13, weight: .semibold))
-                    Text("\(switchExplanation)").font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                    Text("\(switchExplanation)").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Text(canSwitch ? "현재 연결 계정" : "Codex 저장소").font(.system(size: 11, weight: .semibold)).foregroundStyle(DockTheme.muted)
+            Text(canSwitch ? "현재 연결 계정" : "Codex 저장소").font(.system(size: 12, weight: .semibold)).foregroundStyle(DockTheme.muted)
             ForEach(displayedAccounts) { account in
                 VStack(alignment: .leading, spacing: 6) {
                     if account.product == "codex" {
-                        Text(account.home == VSCodeIsolation.home.path ? "전용 VS Code" : "기존 VS Code")
-                            .font(.system(size: 10, weight: .semibold)).foregroundStyle(DockTheme.muted)
+                        Text(VSCodeIsolation.isManagedHome(account.home) ? "전용 VS Code" : "기존 VS Code")
+                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(DockTheme.muted)
                     }
                     if let email = account.email {
                         Text(AppAccountPresentation.displayName(email, presets: presets)).font(.system(size: 13, weight: .medium)).textSelection(.enabled)
                         Text([AccountPreset.planLabel(account.plan), account.statusLabel].compactMap { $0 }.joined(separator: " · "))
-                            .font(.system(size: 10)).foregroundStyle(DockTheme.muted)
+                            .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                     } else { Text(account.statusLabel).font(.system(size: 12)).foregroundStyle(DockTheme.muted) }
                     DisclosureGroup("연결 정보") {
                         VStack(alignment: .leading, spacing: 5) {
@@ -181,14 +183,16 @@ struct AppAccountCard: View {
                                 Text(home.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
                                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                             }
-                        }.font(.system(size: 10)).foregroundStyle(DockTheme.muted).padding(.top, 5)
-                    }.font(.system(size: 10)).foregroundStyle(DockTheme.muted)
+                        }.font(.system(size: 12)).foregroundStyle(DockTheme.muted).padding(.top, 5)
+                    }.font(.system(size: 12)).foregroundStyle(DockTheme.muted)
 
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 if account.id != displayedAccounts.last?.id { Divider().opacity(0.4) }
             }
+            }.frame(maxWidth: .infinity, alignment: .topLeading)
+            Rectangle().fill(DockTheme.navy.opacity(0.10)).frame(width: 1)
+            VStack(alignment: .leading, spacing: 16) {
             if canSwitch {
-                Divider().opacity(0.4)
                 HStack {
                     Text("전용 창에서 사용할 계정").font(.system(size: 12, weight: .semibold))
                     Spacer()
@@ -196,7 +200,7 @@ struct AppAccountCard: View {
                         .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(busy)
                 }
                 if choices.isEmpty {
-                    Text(presets.isEmpty ? "계정을 추가하면 여기에서 선택할 수 있습니다." : "저장한 계정이 모두 연결되어 있습니다.").font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                    Text(presets.isEmpty ? "계정을 추가하면 여기에서 선택할 수 있습니다." : "기존 VS Code 계정 외에 저장된 계정이 없습니다.").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
                 ForEach(choices) { preset in
                     Button { selectedID = preset.id } label: {
@@ -204,12 +208,16 @@ struct AppAccountCard: View {
                             Image(systemName: selectedID == preset.id ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(selectedID == preset.id ? DockTheme.orange : DockTheme.muted)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(preset.displayName).font(.system(size: 12, weight: .medium))
-                                Text(preset.planLabel).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                                Text(preset.displayName).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                                Text(preset.planLabel).font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                                     .lineLimit(1).truncationMode(.middle)
                             }
-                            Spacer(minLength: 0)
-                        }.padding(11).frame(maxWidth: .infinity, alignment: .leading)
+                            Spacer(minLength: 8)
+                            if accounts.contains(where: { $0.home == VSCodeIsolation.workspace(for: preset).home.path }) {
+                                Text("연결됨").font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(DockTheme.muted)
+                            }
+                        }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
                             .background(selectedID == preset.id ? DockTheme.blue.opacity(0.22) : DockTheme.canvas, in: RoundedRectangle(cornerRadius: 10))
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(selectedID == preset.id ? DockTheme.orange.opacity(0.5) : Color.clear))
                             .contentShape(Rectangle())
@@ -217,17 +225,22 @@ struct AppAccountCard: View {
                         .accessibilityLabel("\(title), \(preset.displayName)")
                         .accessibilityAddTraits(selectedID == preset.id ? [.isSelected] : [])
                 }
-                Text(switchExplanation).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                Text(switchExplanation).font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("전용 창 열기") {
+                Button {
                     if let selected {
                         onOpenDedicated?(selected)
                     }
+                } label: {
+                    Label("전용 창 열기", systemImage: "macwindow.badge.plus")
+                        .frame(maxWidth: .infinity)
                 }.buttonStyle(DockButtonStyle(kind: .primary))
                     .disabled(busy || !canSwitch || selected == nil)
             }
-            Spacer(minLength: 0)
-        }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            }.fixedSize(horizontal: false, vertical: true)
+        }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(.white, in: RoundedRectangle(cornerRadius: 16))
     }
 
@@ -251,8 +264,11 @@ enum AppAccountPresentation {
         }
         return result
     }
-    static func choices(_ presets: [AccountPreset], accounts: [AppIdentity]) -> [AccountPreset] {
-        let connected = Set(accounts.compactMap { $0.email?.lowercased() })
-        return presets.filter { !connected.contains($0.email.lowercased()) }
+    @MainActor static func choices(_ presets: [AccountPreset], accounts: [AppIdentity]) -> [AccountPreset] {
+        // Only the ordinary VS Code account is excluded. Dedicated accounts can open more windows.
+        let primaryEmails = Set(accounts.filter {
+            $0.product == "codex" && !VSCodeIsolation.isManagedHome($0.home)
+        }.compactMap { $0.email?.lowercased() })
+        return presets.filter { !primaryEmails.contains($0.email.lowercased()) }
     }
 }

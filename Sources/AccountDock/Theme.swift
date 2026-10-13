@@ -5,7 +5,7 @@ enum DockTheme {
     static let blue = Color(red: 0.65, green: 0.82, blue: 0.88)
     static let orange = Color(red: 1.0, green: 0.40, blue: 0.13)
     static let canvas = Color(red: 0.935, green: 0.955, blue: 0.955)
-    static let muted = Color(red: 0.36, green: 0.43, blue: 0.47)
+    static let muted = Color(red: 0.29, green: 0.37, blue: 0.42)
 }
 
 struct DockButtonStyle: ButtonStyle {
@@ -20,24 +20,23 @@ struct DockButtonStyle: ButtonStyle {
         @Environment(\.isEnabled) private var enabled
         @State private var hovered = false
         var fill: Color {
+            guard enabled else { return DockTheme.navy.opacity(0.07) }
             switch kind {
-            case .primary: DockTheme.orange
-            case .secondary: .white
-            case .quiet: .clear
-            case .danger: Color(red: 0.70, green: 0.18, blue: 0.12)
+            case .primary: return DockTheme.orange
+            case .secondary: return hovered ? DockTheme.canvas : .white
+            case .quiet: return hovered ? DockTheme.blue.opacity(0.18) : .clear
+            case .danger: return Color(red: 0.70, green: 0.18, blue: 0.12)
             }
         }
         var body: some View {
             configuration.label
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(kind == .danger ? .white : DockTheme.navy)
-                .padding(.horizontal, 14).padding(.vertical, 10)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(!enabled ? DockTheme.muted : kind == .danger ? .white : DockTheme.navy)
+                .padding(.horizontal, 16).padding(.vertical, 11)
+                .frame(minHeight: 40)
                 .background(fill, in: RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(DockTheme.navy.opacity(kind == .quiet ? 0 : 0.16)))
-                .shadow(color: DockTheme.navy.opacity(kind == .primary && enabled ? 0.14 : 0), radius: 0, y: 3)
-                .brightness(hovered && enabled ? -0.035 : 0)
-                .opacity(enabled ? 1 : 0.4)
-                .offset(y: configuration.isPressed ? 2 : 0)
+                .overlay(RoundedRectangle(cornerRadius: 9).fill(DockTheme.navy.opacity(configuration.isPressed && enabled ? 0.08 : 0)).allowsHitTesting(false))
                 .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
                 .onHover { hovered = $0 }
         }

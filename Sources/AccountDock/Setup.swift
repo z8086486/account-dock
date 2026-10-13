@@ -87,7 +87,7 @@ struct SetupPanel: View {
                 Toggle("계정별 온라인 사용량 조회", isOn: $usageEnabled).toggleStyle(.switch)
                     .font(.system(size: 13, weight: .medium))
                 Text("OpenAI에 계정별 사용량을 요청합니다.")
-                    .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                    .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
             }.padding(18).background(.white, in: RoundedRectangle(cornerRadius: 13))
             HStack {
                 Button(access.checking ? "확인 중…" : "접근 확인") { Task { await access.check() } }
@@ -112,7 +112,7 @@ struct SetupPanel: View {
             }
             Text(reason).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
             HStack {
-                Text(status).font(.system(size: 10)).foregroundStyle(DockTheme.muted)
+                Text(status).font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 Spacer(); action()
             }
         }.padding(18).background(.white, in: RoundedRectangle(cornerRadius: 13))

@@ -143,7 +143,7 @@ enum VersionService {
         let manifest = (try JSONSerialization.jsonObject(with: Data(contentsOf: ReleaseConfiguration.url))) as? [String: Any] ?? [:]
         let compatibility = manifest["compatibility"] as? [String: [String: Any]] ?? [:]
         var rows: [ProductVersion] = []
-        for (id, version) in [("accountdock", Optional(ReleaseConfiguration.current.version)), ("chatgpt", desktopVersion()), ("codex", extensionVersion())] {
+        for (id, version) in [("accountdock", Optional(ReleaseConfiguration.current.version)), ("codex", extensionVersion())] {
             let remote = online ? await latest(id) : (nil, "not_checked")
             let tests = compatibility[id]?["versions"] as? [String] ?? []
             rows.append(ProductVersion(id: id, installed: version, latest: remote.0, check: remote.1, tested: tests,
