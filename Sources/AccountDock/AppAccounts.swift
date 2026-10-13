@@ -130,8 +130,11 @@ struct AppAccountCard: View {
     let switchExplanation: String
     let onSwitch: (AccountPreset) -> Void
     let onAdd: () -> Void
+    var onConnectEnvironment: (() -> Void)? = nil
     @State private var selectedID: String?
-    private var selected: AccountPreset? { presets.first { $0.id == selectedID } }
+    private var displayedAccounts: [AppIdentity] { AppAccountPresentation.grouped(accounts) }
+    private var choices: [AccountPreset] { AppAccountPresentation.choices(presets, accounts: accounts) }
+    private var selected: AccountPreset? { choices.first { $0.id == selectedID } }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
@@ -148,7 +151,7 @@ struct AppAccountCard: View {
                 Text("계정 확인 전").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
             }
             Text("현재 연결 계정").font(.system(size: 11, weight: .semibold)).foregroundStyle(DockTheme.muted)
-            ForEach(accounts) { account in
+            ForEach(displayedAccounts) { account in
                 VStack(alignment: .leading, spacing: 6) {
                     if account.product == "codex" {
                         Text(account.home == VSCodeIsolation.home.path ? "전용 VS Code · 실험 기능" : "기존 VS Code")
@@ -173,7 +176,11 @@ struct AppAccountCard: View {
                     }.font(.system(size: 10)).foregroundStyle(DockTheme.muted)
 
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                if account.id != accounts.last?.id { Divider().opacity(0.4) }
+                if account.id != displayedAccounts.last?.id { Divider().opacity(0.4) }
+            }
+            if let onConnectEnvironment {
+                Button("테마·대화 연결 후 열기", action: onConnectEnvironment)
+                    .buttonStyle(DockButtonStyle()).disabled(busy)
             }
             Divider().opacity(0.4)
             HStack {
@@ -182,10 +189,10 @@ struct AppAccountCard: View {
                 Button(action: onAdd) { Label("추가", systemImage: "plus") }
                     .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(busy)
             }
-            if presets.isEmpty {
-                Text("계정을 추가하면 여기에서 선택할 수 있습니다.").font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+            if choices.isEmpty {
+                Text(presets.isEmpty ? "계정을 추가하면 여기에서 선택할 수 있습니다." : "저장한 계정이 모두 연결되어 있습니다.").font(.system(size: 11)).foregroundStyle(DockTheme.muted)
             }
-            ForEach(presets) { preset in
+            ForEach(choices) { preset in
                 Button { selectedID = preset.id } label: {
                     HStack(spacing: 10) {
                         Image(systemName: selectedID == preset.id ? "checkmark.circle.fill" : "circle")
@@ -213,5 +220,24 @@ struct AppAccountCard: View {
             Spacer(minLength: 0)
         }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(.white, in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+/// Group connection rows by store and identity, retaining observed extension versions.
+enum AppAccountPresentation {
+    static func grouped(_ accounts: [AppIdentity]) -> [AppIdentity] {
+        var result: [AppIdentity] = []
+        for account in accounts {
+            if let index = result.firstIndex(where: { $0.product == account.product && $0.home == account.home && $0.email == account.email && $0.status == account.status }) {
+                let old = result[index]
+                let versions = Set([old.version, account.version].compactMap { $0 }.flatMap { $0.components(separatedBy: ", ") }).sorted()
+                result[index] = AppIdentity(id: old.id, product: old.product, status: old.status, email: old.email, plan: old.plan, home: old.home, version: versions.isEmpty ? nil : versions.joined(separator: ", "))
+            } else { result.append(account) }
+        }
+        return result
+    }
+    static func choices(_ presets: [AccountPreset], accounts: [AppIdentity]) -> [AccountPreset] {
+        let connected = Set(accounts.compactMap { $0.email?.lowercased() })
+        return presets.filter { !connected.contains($0.email.lowercased()) }
     }
 }

@@ -76,6 +76,7 @@ enum VSCodeIsolation {
         // A CLI inherited from VS Code must not route this launch back to its parent instance.
         for key in ["VSCODE_IPC_HOOK_CLI", "ELECTRON_RUN_AS_NODE", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"] { result.removeValue(forKey: key) }
         result["CODEX_HOME"] = home.path
+        result["CODEX_SQLITE_HOME"] = VSCodeEnvironment.originalHome.path
         return result
     }
     static func launch() async throws {

@@ -8,6 +8,40 @@ final class NativeTests: XCTestCase {
         addTeardownBlock { try FileManager.default.removeItem(at: url) }
         return url
     }
+    func testConnectionGroupingAndExcludingConnectedAccounts() {
+        let rows = ["1", "2"].map { AppIdentity(id: $0, product: "codex", status: "stored_account", email: "a@example.com", plan: nil, home: "/shared", version: $0) }
+            + [AppIdentity(id: "3", product: "codex", status: "stored_account", email: "b@example.com", plan: nil, home: "/dedicated", version: "2")]
+        XCTAssertEqual(AppAccountPresentation.grouped(rows).count, 2)
+        XCTAssertEqual(AppAccountPresentation.grouped(rows).first?.version, "1, 2")
+        let presets = ["a", "b", "c"].map { AccountPreset(id: $0, name: $0, email: "\($0)@example.com", plan: nil, savedAt: Date(), credential: Data()) }
+        XCTAssertEqual(AppAccountPresentation.choices(presets, accounts: rows).map(\.id), ["c"])
+    }
+    @MainActor func testAppearanceImportLimitsScopeAndParsesComments() throws {
+        let source = Data(#"{ /* comment */ "workbench.colorTheme":"Fixture", "editor.fontSize":15, "secret":"keep out", }"#.utf8)
+        let destination = Data(#"{"chatgpt.openOnStartup":true,"window.title":"Dedicated","editor.fontSize":12}"#.utf8)
+        let result = try JSONSerialization.jsonObject(with: VSCodeEnvironment.mergedAppearance(source: source, destination: destination)) as! [String: Any]
+        XCTAssertEqual(result["workbench.colorTheme"] as? String, "Fixture")
+        XCTAssertEqual(result["window.title"] as? String, "Dedicated")
+        XCTAssertNil(result["secret"])
+        XCTAssertEqual(result["editor.fontSize"] as? Int, 15)
+    }
+    @MainActor func testHistoryLinksKeepCredentialsSeparateAndRefuseExistingHistory() throws {
+        let source = try home(), target = try home()
+        let settings = target.appendingPathComponent("settings.json"), original = source.appendingPathComponent("settings.json")
+        try Data("{}".utf8).write(to: settings); try Data("{}".utf8).write(to: original)
+        let credential = Data("dedicated-auth".utf8)
+        try credential.write(to: target.appendingPathComponent("auth.json"))
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("sessions"), withIntermediateDirectories: true)
+        try Data("fixture".utf8).write(to: source.appendingPathComponent("sessions/example.jsonl"))
+        try VSCodeEnvironment.prepare(source: source, destination: target, sourceSettings: original, targetSettings: settings)
+        XCTAssertEqual(try Data(contentsOf: target.appendingPathComponent("sessions/example.jsonl")), Data("fixture".utf8))
+        XCTAssertEqual(try Data(contentsOf: target.appendingPathComponent("auth.json")), credential)
+        try VSCodeEnvironment.prepare(source: source, destination: target, sourceSettings: original, targetSettings: settings)
+        let conflict = try home()
+        try FileManager.default.createDirectory(at: conflict.appendingPathComponent("sessions"), withIntermediateDirectories: true)
+        XCTAssertThrowsError(try VSCodeEnvironment.prepare(source: source, destination: conflict, sourceSettings: original, targetSettings: settings))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: conflict.appendingPathComponent("archived_sessions").path))
+    }
     func testTransactionConflictAndActivityFailurePreserveCurrentAccount() throws {
         let directory = try home(), path = directory.appendingPathComponent("auth.json")
         let old = Data("old".utf8), new = Data("new".utf8)
