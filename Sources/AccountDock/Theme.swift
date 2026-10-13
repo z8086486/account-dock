@@ -42,3 +42,25 @@ struct DockButtonStyle: ButtonStyle {
         }
     }
 }
+
+/// Keep disclosure labels and content aligned regardless of their intrinsic width.
+struct DockDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { configuration.isExpanded.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold)).frame(width: 12)
+                    configuration.label
+                    Spacer(minLength: 0)
+                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+                .accessibilityValue(configuration.isExpanded ? "펼쳐짐" : "접힘")
+            if configuration.isExpanded {
+                configuration.content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 18)
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}

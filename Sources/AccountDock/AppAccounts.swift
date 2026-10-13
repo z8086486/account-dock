@@ -11,7 +11,7 @@ struct AppIdentity: Decodable, Identifiable {
     let version: String?
     var statusLabel: String {
         switch status {
-        case "stored_account": return "저장소에서 확인"
+        case "stored_account": return "이 Mac에 저장된 계정"
         case "not_running": return "앱이 실행 중이 아닙니다"
         case "process_unavailable": return "계정 연결 프로세스를 찾지 못했습니다"
         case "no_saved_auth": return "인증 파일 없음 · 세션은 확인 필요"
@@ -61,6 +61,18 @@ enum AppIdentityReader {
             } catch { }
             let key = [product, home ?? "", version ?? "", status].joined(separator: "|")
             if seen.insert(key).inserted { accounts.append(AppIdentity(id: key, product: product, status: status, email: email, plan: plan, home: home, version: version)) }
+        }
+        // Keep managed instances visible even if their Codex sidebar/extension is not active.
+        for row in rows where row.path == editor + "MacOS/Code" {
+            guard let (args, environment) = try? arguments(row.pid),
+                  let path = environment["CODEX_HOME"],
+                  let workspace = try? VSCodeIsolation.closeWorkspace(for: path),
+                  VSCodeIsolation.matchesCloseTarget(args: args, environment: environment, workspace: workspace),
+                  !accounts.contains(where: { $0.product == "codex" && $0.home == workspace.home.path }) else { continue }
+            let identity = try? storedIdentity(workspace.home.path)
+            accounts.append(AppIdentity(id: "managed|" + workspace.home.path, product: "codex",
+                status: identity?.status ?? "unavailable", email: identity?.email, plan: identity?.plan,
+                home: workspace.home.path, version: nil))
         }
         for product in ["codex"] where !accounts.contains(where: { $0.product == product }) {
             let root = product == "chatgpt" ? desktop + "MacOS/ChatGPT" : editor + "MacOS/Code"
@@ -129,6 +141,7 @@ struct AppAccountCard: View {
     let switchExplanation: String
     let onAdd: () -> Void
     var onOpenDedicated: ((AccountPreset) -> Void)? = nil
+    var onCloseDedicated: ((AppIdentity) -> Void)? = nil
     @State private var selectedID: String?
     private var displayedAccounts: [AppIdentity] { AppAccountPresentation.grouped(accounts) }
     private var choices: [AccountPreset] {
@@ -164,27 +177,36 @@ struct AppAccountCard: View {
             ForEach(displayedAccounts) { account in
                 VStack(alignment: .leading, spacing: 6) {
                     if account.product == "codex" {
-                        Text(VSCodeIsolation.isManagedHome(account.home) ? "전용 VS Code" : "기존 VS Code")
+                        Text(VSCodeIsolation.isManagedHome(account.home) ? "계정별 VS Code" : "기존 VS Code")
                             .font(.system(size: 12, weight: .semibold)).foregroundStyle(DockTheme.muted)
                     }
                     if let email = account.email {
-                        Text(AppAccountPresentation.displayName(email, presets: presets)).font(.system(size: 13, weight: .medium)).textSelection(.enabled)
+                        Text(AppAccountPresentation.displayName(email, presets: presets)).font(.system(size: 14, weight: .semibold)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         Text([AccountPreset.planLabel(account.plan), account.statusLabel].compactMap { $0 }.joined(separator: " · "))
                             .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                     } else { Text(account.statusLabel).font(.system(size: 12)).foregroundStyle(DockTheme.muted) }
+                    if account.product == "codex", (try? VSCodeIsolation.closeWorkspace(for: account.home)) != nil {
+                        Button { onCloseDedicated?(account) } label: {
+                            Label("모든 창 닫기", systemImage: "xmark.rectangle")
+                        }.buttonStyle(DockButtonStyle()).disabled(busy || onCloseDedicated == nil)
+                            .help("이 VS Code에 열린 모든 창을 닫습니다.")
+                    }
                     DisclosureGroup("연결 정보") {
                         VStack(alignment: .leading, spacing: 5) {
-                            if let email = account.email { Text(email).textSelection(.enabled) }
+                            if let email = account.email { Text(email).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
                             if let version = account.version {
-                                Text("실행 중 확장 · \(version)")
+                                Text("사용 중인 Codex 버전 · \(version)")
                                 if let installed, version != installed { Text("설치 버전과 다름 · VS Code 재시작 후 확인").foregroundStyle(DockTheme.orange) }
                             }
                             if let home = account.home {
                                 Text(home.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
                                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                             }
-                        }.font(.system(size: 12)).foregroundStyle(DockTheme.muted).padding(.top, 5)
-                    }.font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                        }.font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }.disclosureGroupStyle(DockDisclosureStyle()).font(.system(size: 12)).foregroundStyle(DockTheme.muted)
 
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 if account.id != displayedAccounts.last?.id { Divider().opacity(0.4) }
@@ -194,7 +216,7 @@ struct AppAccountCard: View {
             VStack(alignment: .leading, spacing: 16) {
             if canSwitch {
                 HStack {
-                    Text("전용 창에서 사용할 계정").font(.system(size: 12, weight: .semibold))
+                    Text("계정별 VS Code 열기").font(.system(size: 12, weight: .semibold))
                     Spacer()
                     Button(action: onAdd) { Label("추가", systemImage: "plus") }
                         .buttonStyle(DockButtonStyle(kind: .quiet)).disabled(busy)
@@ -232,7 +254,7 @@ struct AppAccountCard: View {
                         onOpenDedicated?(selected)
                     }
                 } label: {
-                    Label("전용 창 열기", systemImage: "macwindow.badge.plus")
+                    Label("새 창 열기", systemImage: "macwindow.badge.plus")
                         .frame(maxWidth: .infinity)
                 }.buttonStyle(DockButtonStyle(kind: .primary))
                     .disabled(busy || !canSwitch || selected == nil)

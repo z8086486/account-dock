@@ -30,23 +30,82 @@ enum VSCodeIsolation {
         let url = URL(fileURLWithPath: path).standardizedFileURL
         return url == home || (url.path.hasPrefix(root.appendingPathComponent("accounts").path + "/") && url.lastPathComponent == "codex")
     }
+    static func closeWorkspace(for path: String?) throws -> Workspace {
+        guard let path else { throw DockError.message("계정별 VS Code 창 경로를 확인하지 못했습니다.") }
+        let candidate = URL(fileURLWithPath: path).standardizedFileURL
+        let workspace: Workspace
+        if candidate == home {
+            workspace = Workspace(root: root)
+        } else {
+            let parent = candidate.deletingLastPathComponent()
+            let key = parent.lastPathComponent
+            guard candidate.lastPathComponent == "codex",
+                  parent.deletingLastPathComponent() == root.appendingPathComponent("accounts"),
+                  key.count == 64, key.allSatisfy({ "0123456789abcdef".contains($0) }) else {
+                throw DockError.message("Account Dock 계정별 VS Code 창만 닫을 수 있습니다.")
+            }
+            workspace = Workspace(root: parent, userData: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".account-dock/code").appendingPathComponent(String(key.prefix(32))))
+            guard (try? String(contentsOf: workspace.userData.appendingPathComponent("account-dock-owner"), encoding: .utf8)) == key else {
+                throw DockError.message("계정별 VS Code 창의 소유 계정을 확인하지 못했습니다.")
+            }
+        }
+        try validateDirectory(workspace.root)
+        try validateDirectory(workspace.home)
+        try validateDirectory(workspace.userData)
+        guard FileManager.default.fileExists(atPath: workspace.root.appendingPathComponent("account-dock-managed-v1").path) else {
+            throw DockError.message("Account Dock에서 만든 계정별 VS Code 창을 확인하지 못했습니다.")
+        }
+        return workspace
+    }
+    static func matchesCloseTarget(args: [String], environment: [String: String], workspace: Workspace) -> Bool {
+        // Closing is stricter than the write guard: BOTH the app's user data and auth home must match.
+        guard let value = environment["CODEX_HOME"],
+              URL(fileURLWithPath: value).standardizedFileURL == workspace.home.standardizedFileURL else { return false }
+        return targetsManagedStore(args: args, environment: [:], home: workspace.home, userData: workspace.userData)
+    }
+    static func close(home path: String?) async throws -> Bool {
+        let workspace = try closeWorkspace(for: path)
+        let executable = URL(fileURLWithPath: AppIdentityReader.editor + "MacOS/Code")
+        var targets: [NSRunningApplication] = []
+        for app in NSRunningApplication.runningApplications(withBundleIdentifier: "com.microsoft.VSCode") {
+            guard !app.isTerminated, app.executableURL == executable else { continue }
+            let (args, environment) = try AppIdentityReader.arguments(app.processIdentifier)
+            if matchesCloseTarget(args: args, environment: environment, workspace: workspace) { targets.append(app) }
+        }
+        guard !targets.isEmpty else { throw DockError.message("닫을 계정별 VS Code 인스턴스가 없습니다. 새로고침해 주세요.") }
+        // Fail closed if the environment is ambiguous; never close all apps sharing the bundle ID.
+        guard targets.count == 1, let app = targets.first, !app.isTerminated else {
+            throw DockError.message("계정별 인스턴스를 하나로 확인하지 못해 닫지 않았습니다.")
+        }
+        let (args, environment) = try AppIdentityReader.arguments(app.processIdentifier)
+        guard matchesCloseTarget(args: args, environment: environment, workspace: workspace), app.terminate() else {
+            throw DockError.message("계정별 VS Code 창에 종료를 요청하지 못했습니다.")
+        }
+        for _ in 0..<40 {
+            if app.isTerminated { return true }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        // The editor may show a save prompt or the user may cancel. Never escalate to forceTerminate.
+        return app.isTerminated
+    }
     static func requireMatchingIdentity(_ credential: Data?, preset: AccountPreset) throws {
         guard let credential,
               let json = try JSONSerialization.jsonObject(with: credential) as? [String: Any],
               let tokens = json["tokens"] as? [String: Any],
               let token = tokens["id_token"] as? String,
               let email = CodexService.claims(token)["email"] as? String else {
-            throw DockError.message("전용 창의 계정을 확인하지 못했습니다. 해당 계정의 전용 VS Code를 종료한 뒤 다시 시도하세요.")
+            throw DockError.message("계정별 VS Code 창의 계정을 확인하지 못했습니다. 해당 계정의 계정별 VS Code를 종료한 뒤 다시 시도하세요.")
         }
         let stored = AccountPreset(id: "", name: "", email: email, plan: nil, savedAt: Date(), credential: credential)
         guard stored.identityKey == preset.identityKey else {
-            throw DockError.message("전용 창의 로그인 계정이 변경되어 새 창을 열지 않았습니다. 해당 전용 VS Code를 종료한 뒤 로그인 상태를 확인하세요.")
+            throw DockError.message("계정별 VS Code 창의 로그인 계정이 변경되어 새 창을 열지 않았습니다. 해당 계정별 VS Code를 종료한 뒤 로그인 상태를 확인하세요.")
         }
     }
     static let executable = URL(fileURLWithPath: "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code")
     static func validateDirectory(_ url: URL) throws {
         guard url.standardizedFileURL == url.resolvingSymlinksInPath().standardizedFileURL else {
-            throw DockError.message("전용 VS Code 경로에 심볼릭 링크가 있어 변경하지 않았습니다.")
+            throw DockError.message("계정별 VS Code 경로에 심볼릭 링크가 있어 변경하지 않았습니다.")
         }
     }
     static func prepare(_ workspace: Workspace, name: String) throws {
@@ -120,7 +179,7 @@ enum VSCodeIsolation {
     }
     static func requireStopped(_ workspace: Workspace) throws {
         guard try !isRunning(workspace) else {
-            throw DockError.message("이 계정의 전용 VS Code가 실행 중이어서 인증을 변경하지 않았습니다. 다시 누르면 같은 계정의 창을 추가로 엽니다.")
+            throw DockError.message("이 계정의 계정별 VS Code가 실행 중이어서 인증을 변경하지 않았습니다. 다시 누르면 같은 계정의 창을 추가로 엽니다.")
         }
     }
     static func launchEnvironment(_ input: [String: String], home: URL) -> [String: String] {
@@ -145,7 +204,7 @@ enum VSCodeIsolation {
             if Date() > deadline || Task.isCancelled { task.terminate(); throw DockError.message("VS Code 실행 확인 시간이 초과되었습니다. 적용된 계정은 전용 폴더에만 있습니다.") }
             try await Task.sleep(for: .milliseconds(100))
         }
-        guard task.terminationStatus == 0 else { throw DockError.message("전용 VS Code를 열지 못했습니다. 기존 앱 계정은 변경하지 않았습니다.") }
+        guard task.terminationStatus == 0 else { throw DockError.message("계정별 VS Code를 열지 못했습니다. 기존 앱 계정은 변경하지 않았습니다.") }
         // CLI success can also mean routing to another process. Verify the requested instance exists.
         for _ in 0..<50 {
             if try isRunning(workspace) { return }

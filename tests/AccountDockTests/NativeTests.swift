@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import AccountDock
 
 final class NativeTests: XCTestCase {
@@ -228,6 +229,52 @@ final class NativeTests: XCTestCase {
         XCTAssertNil(environment["VSCODE_PID"])
         XCTAssertNil(environment["OPENAI_API_KEY"])
         XCTAssertNil(environment["ELECTRON_RUN_AS_NODE"])
+    }
+    @MainActor func testDedicatedCloseFixtureWhenExplicitlyEnabled() async throws {
+        guard ProcessInfo.processInfo.environment["ACCOUNT_DOCK_CLOSE_CHECK"] == "1" else {
+            throw XCTSkip("Opt-in disposable VS Code instance check")
+        }
+        let original = NSRunningApplication.runningApplications(withBundleIdentifier: "com.microsoft.VSCode")
+        let key = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let workspace = VSCodeIsolation.Workspace(root: VSCodeIsolation.root.appendingPathComponent("accounts/" + key + key),
+            userData: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".account-dock/code/" + key))
+        try VSCodeIsolation.prepare(workspace, name: "Account Dock close test")
+        defer {
+            if (try? VSCodeIsolation.isRunning(workspace)) == false {
+                try? FileManager.default.removeItem(at: workspace.root)
+                try? FileManager.default.removeItem(at: workspace.userData)
+            }
+        }
+        let process = Process()
+        process.executableURL = VSCodeIsolation.executable
+        process.arguments = ["--user-data-dir", workspace.userData.path, "--new-window", "--disable-extensions", "--skip-welcome", "--skip-release-notes"]
+        process.environment = VSCodeIsolation.launchEnvironment(ProcessInfo.processInfo.environment, home: workspace.home)
+        process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.nullDevice
+        try process.run()
+        for _ in 0..<100 {
+            if !process.isRunning, try VSCodeIsolation.isRunning(workspace) { break }
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        XCTAssertTrue(try VSCodeIsolation.isRunning(workspace))
+        try await Task.sleep(for: .seconds(2))
+        let closed = try await VSCodeIsolation.close(home: workspace.home.path)
+        XCTAssertTrue(closed)
+        XCTAssertFalse(try VSCodeIsolation.isRunning(workspace))
+        XCTAssertTrue(original.allSatisfy { !$0.isTerminated }, "Pre-existing VS Code instances must remain running")
+    }
+    @MainActor func testCloseRequiresBothDedicatedPathsAndRejectsMainVSCode() throws {
+        let workspace = VSCodeIsolation.Workspace(root: URL(fileURLWithPath: "/private/tmp/dedicated"))
+        let args = ["--user-data-dir", workspace.userData.path]
+        let environment = ["CODEX_HOME": workspace.home.path]
+        XCTAssertTrue(VSCodeIsolation.matchesCloseTarget(args: args, environment: environment, workspace: workspace))
+        XCTAssertTrue(VSCodeIsolation.matchesCloseTarget(args: ["--user-data-dir=" + workspace.userData.path], environment: environment, workspace: workspace))
+        XCTAssertFalse(VSCodeIsolation.matchesCloseTarget(args: [], environment: environment, workspace: workspace))
+        XCTAssertFalse(VSCodeIsolation.matchesCloseTarget(args: args, environment: [:], workspace: workspace))
+        XCTAssertFalse(VSCodeIsolation.matchesCloseTarget(args: args, environment: ["CODEX_HOME": "/Users/fixture/.codex"], workspace: workspace))
+        XCTAssertFalse(VSCodeIsolation.matchesCloseTarget(args: ["--user-data-dir", "/private/tmp/other"], environment: environment, workspace: workspace))
+        XCTAssertThrowsError(try VSCodeIsolation.closeWorkspace(for: nil))
+        XCTAssertThrowsError(try VSCodeIsolation.closeWorkspace(for: AccessSetup.home))
+        XCTAssertThrowsError(try VSCodeIsolation.closeWorkspace(for: VSCodeIsolation.root.appendingPathComponent("accounts/not-a-key/codex").path))
     }
     @MainActor func testManagedDirectoryRejectsSymlinks() throws {
         let directory = try home()

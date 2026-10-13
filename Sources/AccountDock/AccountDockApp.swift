@@ -159,11 +159,23 @@ final class DockModel: ObservableObject {
             message = "저장한 계정을 이 Mac의 Keychain에 저장했습니다."
         } catch { message = error.localizedDescription }
     }
+    func closeDedicated(_ account: AppIdentity) async {
+        guard !busy, !refreshingUsage else { return }
+        busy = true
+        defer { busy = false }
+        message = "계정별 VS Code 창에 종료를 요청하고 있습니다."
+        do {
+            guard account.product == "codex" else { throw DockError.message("계정별 VS Code만 닫을 수 있습니다.") }
+            let closed = try await VSCodeIsolation.close(home: account.home)
+            appAccounts = try await AppIdentityReader.read().accounts
+            message = closed ? "계정별 VS Code 창을 닫았습니다." : "VS Code가 아직 열려 있습니다. 저장 확인 창이나 종료 취소 여부를 확인하세요."
+        } catch { message = error.localizedDescription }
+    }
     func applyToVSCode(_ preset: AccountPreset) async {
         guard !busy, !refreshingUsage else { return }
         busy = true
         defer { busy = false }
-        message = "전용 창을 준비하고 있습니다."
+        message = "계정별 VS Code 창을 준비하고 있습니다."
         do {
             guard FileManager.default.isExecutableFile(atPath: VSCodeIsolation.executable.path),
                   VersionService.extensionVersion() != nil else { throw DockError.message("기본 경로에 VS Code와 공식 Codex 확장을 설치해 주세요.") }
@@ -178,7 +190,7 @@ final class DockModel: ObservableObject {
             if try VSCodeIsolation.isRunning(workspace) {
                 // Reuse the account process without touching tokens, history links or settings.
                 guard try AppIdentityReader.storedIdentity(home.path).status == "stored_account" else {
-                    throw DockError.message("실행 중인 전용 창의 인증을 확인하지 못했습니다.")
+                    throw DockError.message("실행 중인 계정별 VS Code 창의 인증을 확인하지 못했습니다.")
                 }
                 try VSCodeIsolation.requireMatchingIdentity(before, preset: latest)
                 try await VSCodeIsolation.launch(workspace)
@@ -192,7 +204,7 @@ final class DockModel: ObservableObject {
             // Never overwrite a different identity or an unsupported auth store.
             let identity = try AppIdentityReader.storedIdentity(home.path)
             guard ["stored_account", "no_saved_auth"].contains(identity.status) else {
-                throw DockError.message("전용 VS Code의 인증 저장 방식을 지원하지 않습니다.")
+                throw DockError.message("계정별 VS Code의 인증 저장 방식을 지원하지 않습니다.")
             }
             if let before { try VSCodeIsolation.requireMatchingIdentity(before, preset: latest) }
             // Keep tokens refreshed by VS Code instead of replacing them with an older saved copy.
@@ -217,12 +229,12 @@ final class DockModel: ObservableObject {
                         try VSCodeIsolation.requireStopped(workspace)
                     }
                 } catch {
-                    throw DockError.message("전용 창의 실행 상태가 불확실해 인증을 복구하지 않았습니다. 해당 창을 확인하세요.")
+                    throw DockError.message("계정별 VS Code 창의 실행 상태가 불확실해 인증을 복구하지 않았습니다. 해당 창을 확인하세요.")
                 }
-                throw DockError.message("전용 창을 열지 못해 이전 인증으로 복구했습니다.")
+                throw DockError.message("계정별 VS Code 창을 열지 못해 이전 인증으로 복구했습니다.")
             }
             appAccounts = try await AppIdentityReader.read().accounts
-            message = "\(latest.displayName) 전용 창을 열었습니다."
+            message = "\(latest.displayName) 계정별 VS Code 창을 열었습니다."
         } catch { message = error.localizedDescription }
     }
     func registerCurrentAccount() async {
@@ -273,6 +285,8 @@ struct Dashboard: View {
     @State private var showSetup = false
     @State private var renamingPreset: AccountPreset?
     @State private var menuRefresh = 0
+    @State private var closingAccount: AppIdentity?
+    @State private var showCloseDedicated = false
     @State private var showAdd = false
     @State private var newAccountName = ""
     @State private var showDelete = false
@@ -306,6 +320,7 @@ struct Dashboard: View {
             }.background(DockTheme.canvas)
         }
         .foregroundStyle(ink).tint(accent).preferredColorScheme(.light)
+        .multilineTextAlignment(.leading)
         .frame(minWidth: 1020, minHeight: 780)
         .onAppear { updates.canRestart = { !model.busy && !model.refreshingUsage } }
         .task {
@@ -352,6 +367,12 @@ struct Dashboard: View {
                     }.buttonStyle(DockButtonStyle(kind: .primary))
                 }
             }.padding(28).frame(width: 440).background(DockTheme.canvas)
+        }
+        .alert("이 VS Code의 모든 창을 닫을까요?", isPresented: $showCloseDedicated, presenting: closingAccount) { account in
+            Button("취소", role: .cancel) {}
+            Button("모든 창 닫기") { Task { await model.closeDedicated(account) } }
+        } message: { account in
+            Text("\(account.email.map { AppAccountPresentation.displayName($0, presets: model.presets) } ?? "선택한 계정") 계정으로 열린 이 VS Code의 모든 창을 닫습니다. 진행 중인 Codex 작업이 중단될 수 있습니다. 저장하지 않은 내용은 VS Code의 저장 확인 또는 복원 설정에 따라 처리됩니다. 기본 VS Code와 다른 VS Code는 유지됩니다.")
         }
         .alert("저장한 계정을 삭제할까요?", isPresented: $showDelete, presenting: pendingDelete) { preset in
             Button("취소", role: .cancel) {}
@@ -418,9 +439,10 @@ struct Dashboard: View {
                     presets: model.presets, busy: model.busy || model.refreshingUsage, canSwitch: true,
                     switchExplanation: "계정별로 여러 창을 열 수 있습니다. 같은 대화의 동시 작업은 피하세요.",
                     onAdd: { newAccountName = ""; showAdd = true },
-                    onOpenDedicated: { preset in Task { await model.applyToVSCode(preset) } })
+                    onOpenDedicated: { preset in Task { await model.applyToVSCode(preset) } },
+                    onCloseDedicated: { account in closingAccount = account; showCloseDedicated = true })
             }.fixedSize(horizontal: false, vertical: true)
-            Text("저장소 기준입니다. 실제 로그인은 해당 앱에서 확인하세요.")
+            Text("실제 로그인 상태는 VS Code에서 확인하세요.")
                 .font(.system(size: 12)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
         }
     }

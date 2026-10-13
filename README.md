@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/z8086486/account-dock/releases">다운로드</a> ·
   <a href="https://github.com/z8086486/account-dock/issues">버그 제보</a> ·
-  <a href="ISOLATION.md">전용 창 안내</a>
+  <a href="ISOLATION.md">계정별 VS Code 안내</a>
 </p>
 
 ![계정 관리](assets/accounts.png)
@@ -20,7 +20,7 @@
 
 - 계정 추가·이름 지정·macOS Keychain 저장
 - 계정별 플랜, Codex 사용 한도와 크레딧 조회
-- 여러 계정의 VS Code 전용 창과 같은 계정의 추가 창 열기
+- 계정별 VS Code 실행과 같은 계정의 추가 창 열기
 - 기존 VS Code의 테마·로컬 대화 연결
 - 앱 안에서 업데이트 다운로드·설치·재실행
 
@@ -40,7 +40,7 @@ VS Code는 `/Applications`에 설치되어 있어야 합니다. Python·Xcode는
 
 ## 사용법
 
-**계정 관리**에서 계정을 선택해 **전용 창 열기**를 누릅니다. 기존 VS Code 계정은 선택 목록에서 제외되고, 전용 창의 계정은 다시 선택해 창을 추가할 수 있습니다. 같은 로컬 대화를 여러 창에서 동시에 실행하지 마세요.
+**계정 관리**에서 계정을 선택해 **새 창 열기**를 누릅니다. 기존 VS Code 계정은 선택 목록에서 제외되고, 계정별 VS Code에 연결된 계정은 다시 선택해 창을 추가할 수 있습니다. 계정별 VS Code 옆의 **모든 창 닫기**로 해당 인스턴스의 모든 창을 닫을 수 있습니다. 기본 VS Code는 종료하지 않습니다. 같은 로컬 대화를 여러 창에서 동시에 실행하지 마세요.
 
 **저장한 계정**에서 이름과 사용량을 관리합니다. 이름이 없으면 이메일이 표시됩니다. ‘기본 Codex 계정’은 기본 인증 저장소의 계정을 뜻합니다.
 
@@ -52,7 +52,7 @@ VS Code는 `/Applications`에 설치되어 있어야 합니다. Python·Xcode는
 
 | 대상 | 지원 |
 | --- | --- |
-| VS Code · Codex | 로컬 계정 조회, 계정별 전용 창, 테마·로컬 대화 연결 |
+| VS Code · Codex | 로컬 계정 조회, 계정별 VS Code, 테마·로컬 대화 연결 |
 | Anthropic Claude | 지원 예정 |
 
 사용량은 Codex 기준이며 API 결제 잔액이 아닙니다. 인증 정보는 로컬 Keychain에 저장하고, 온라인 사용량 조회는 **설정**에서 끌 수 있습니다.

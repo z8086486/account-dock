@@ -47,7 +47,7 @@ enum VSCodeEnvironment {
                     throw DockError.message("다른 대화 폴더 연결이 있어 변경하지 않았습니다.")
                 }
             } else if fm.fileExists(atPath: to.path) {
-                throw DockError.message("전용 창에 기존 대화 데이터가 있습니다. 기록을 보존하기 위해 자동 연결을 중단했습니다.")
+                throw DockError.message("계정별 VS Code 창에 기존 대화 데이터가 있습니다. 기록을 보존하기 위해 자동 연결을 중단했습니다.")
             }
         }
         try VSCodeIsolation.validateDirectory(targetSettings)
