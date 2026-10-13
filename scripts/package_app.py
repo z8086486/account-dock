@@ -50,7 +50,7 @@ def main():
         (contents / name).mkdir(parents=True)
     shutil.copy2(binary_dir / 'AccountDock', contents / 'MacOS/AccountDock')
     shutil.copytree(binary_dir / 'Sparkle.framework', contents / 'Frameworks/Sparkle.framework', symlinks=True)
-    for script in ['doctor.py', 'versions.py', 'usage.py']:
+    for script in ['doctor.py', 'versions.py', 'usage.py', 'app_accounts.py']:
         shutil.copy2(ROOT / 'scripts' / script, contents / 'Resources' / script)
     shutil.copy2(MANIFEST, contents / 'Resources/release.json')
     for asset in ['AppIcon.icns', 'AccountDock.png']:

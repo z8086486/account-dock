@@ -77,3 +77,9 @@ __pycache__/
 !/scripts/usage.py
 !/scripts/generate_icon.swift
 !/tests/test_usage.py
+
+# Reviewed app-specific source lookup and release checklist.
+!/Sources/AccountDock/AppAccounts.swift
+!/scripts/app_accounts.py
+!/tests/test_app_accounts.py
+!/RELEASE_CHECKLIST.md

@@ -14,10 +14,27 @@ struct UsageWindow: Decodable, Identifiable {
         return "\(Int(minutes))분 한도 · \(bucket)"
     }
 }
+struct CreditBalance: Decodable, Identifiable {
+    let id: String
+    let bucket: String
+    let status: String
+    let balance: String?
+    var label: String {
+        switch status {
+        case "unlimited": return "무제한"
+        case "balance": return balance.map { "\($0) 크레딧" } ?? "잔액 미제공"
+        case "empty": return "남은 크레딧 없음"
+        case "available": return "크레딧 있음 · 잔액 미제공"
+        default: return "잔액 미제공"
+        }
+    }
+}
 struct UsageReport: Decodable {
     let status: String
     let windows: [UsageWindow]
     let activity: [String: Double]
+    var credits: [CreditBalance]? = nil
+    var resetCredits: Int? = nil
     let checkedAt: Double?
 }
 
@@ -58,7 +75,7 @@ struct AccountUsageView: View {
                 if report.status == "login_required" {
                     Label("사용량 조회를 위해 이 계정으로 다시 로그인해 주세요.", systemImage: "lock.rotation")
                         .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
-                } else if report.windows.isEmpty && report.activity.isEmpty {
+                } else if report.windows.isEmpty && report.activity.isEmpty && (report.credits ?? []).isEmpty && report.resetCredits == nil {
                     Text("사용량 정보를 제공받지 못했습니다. 잠시 후 다시 확인해 주세요.")
                         .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
                 }
@@ -82,6 +99,22 @@ struct AccountUsageView: View {
                                 .font(.system(size: 10)).foregroundStyle(DockTheme.muted)
                         }
                     }
+                }
+                ForEach(report.credits ?? []) { credit in
+                    HStack {
+                        Label("크레딧 · \(credit.bucket)", systemImage: "circle.hexagongrid")
+                        Spacer()
+                        Text(credit.label).fontWeight(.semibold)
+                    }.font(.system(size: 12)).padding(12)
+                        .background(DockTheme.blue.opacity(0.18), in: RoundedRectangle(cornerRadius: 9))
+                }
+                if let count = report.resetCredits {
+                    HStack { Text("한도 초기화 보상"); Spacer(); Text("\(count)회 남음") }
+                        .font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                }
+                if (report.credits ?? []).isEmpty && ["available", "partial"].contains(report.status) {
+                    Text("크레딧 잔액 · 확인할 수 없음")
+                        .font(.system(size: 10)).foregroundStyle(DockTheme.muted)
                 }
                 if let lifetime = report.activity["lifetimeTokens"] {
                     Text("누적 사용 토큰 · \(lifetime.formatted(.number.precision(.fractionLength(0))))")

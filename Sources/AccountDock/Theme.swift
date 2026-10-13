@@ -43,13 +43,3 @@ struct DockButtonStyle: ButtonStyle {
         }
     }
 }
-
-struct DockStripes: View {
-    var body: some View {
-        HStack(spacing: 4) {
-            Rectangle().fill(DockTheme.orange).frame(width: 24)
-            Rectangle().fill(DockTheme.navy).frame(width: 5)
-            Rectangle().fill(DockTheme.blue).frame(width: 10)
-        }.rotationEffect(.degrees(18)).frame(width: 58).clipped().accessibilityHidden(true)
-    }
-}

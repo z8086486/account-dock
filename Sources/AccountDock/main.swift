@@ -19,6 +19,7 @@ struct AccountDockApp: App {
 
 @MainActor
 final class DockModel: ObservableObject {
+    @Published var appAccounts: [AppIdentity] = []
     @Published var report: AccountReport?
     @Published var presets: [AccountPreset] = []
     @Published var busy = false
@@ -43,6 +44,9 @@ final class DockModel: ObservableObject {
         message = action == "login" ? "브라우저에서 로그인해 주세요. 최대 3분 동안 기다립니다." : nil
         defer { busy = false; process = nil }
         do {
+            appAccounts = (try? await AppIdentityReader.read().accounts) ?? ["chatgpt", "codex"].map {
+                AppIdentity(id: $0, product: $0, status: "unavailable", email: nil, plan: nil, home: nil, version: nil)
+            }
             let updated = try await run(action)
             if updated.codex.status == "error" || updated.codex.status == "unavailable" {
                 message = "계정을 확인하지 못했습니다. Codex 설치 및 로그인 상태를 확인하고 다시 시도해 주세요."
@@ -198,9 +202,8 @@ struct Dashboard: View {
                         }.padding(14).background(accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                     }
                     if selection == "accounts" {
-                        overview
                         targets
-                        presetSection
+                        overview
                     } else if selection == "updates" { UpdatePanel(center: updates) } else if selection == "access" { SetupPanel() } else { presetSection }
                     footer
                 }.padding(32)
@@ -245,17 +248,12 @@ struct Dashboard: View {
                 DockIcon(size: 42)
                 Text("Account Dock").font(.system(size: 16, weight: .semibold))
             }.padding(.top, 40).padding(.bottom, 42)
-            Text("CONTROL PANEL").font(.system(size: 9, weight: .semibold)).tracking(2).foregroundStyle(DockTheme.blue.opacity(0.75)).padding(.bottom, 14)
             nav("계정 관리", icon: "square.grid.2x2", id: "accounts")
             nav("저장한 계정", icon: "person.crop.rectangle.stack", id: "presets")
             nav("버전 · 업데이트", icon: "arrow.down.circle", id: "updates")
             nav("접근 및 개인정보", icon: "lock.shield", id: "access")
             Spacer()
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(spacing: 6) { Circle().fill(accent).frame(width: 5, height: 5); Text("ON THIS MAC").tracking(1.5) }
-                    .font(.system(size: 9, weight: .semibold))
-                Text("계정은 가까이,\n전환은 간단하게.").font(.system(size: 13)).lineSpacing(5).foregroundStyle(DockTheme.blue.opacity(0.75))
-            }.padding(.bottom, 28)
+            Text("계정 정보는 이 Mac에 보관됩니다.").font(.system(size: 10)).foregroundStyle(DockTheme.blue.opacity(0.75)).padding(.bottom, 20)
             Divider()
             Text("v\(ReleaseConfiguration.current.version) · PREVIEW").font(.system(size: 10)).foregroundStyle(DockTheme.blue.opacity(0.75)).padding(.vertical, 20)
         }.padding(.horizontal, 22).frame(width: 210)
@@ -277,14 +275,12 @@ struct Dashboard: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 9) {
-                Text("ACCOUNT DOCK  /  CONTROL SERIES").font(.system(size: 9, weight: .medium)).tracking(2.5).foregroundStyle(muted)
                 Text(selection == "accounts" ? "내 계정, 한눈에." : selection == "updates" ? "버전과 업데이트." : selection == "access" ? "필요한 접근만." : "다음에도, 이 계정으로.")
                     .font(.system(size: 29, weight: .semibold))
                 Text(selection == "accounts" ? "연결 상태를 확인하고 저장한 계정으로 전환하세요." : selection == "updates" ? "설치부터 다음 업데이트까지, 한곳에서." : selection == "access" ? "계정 정보가 어디에 쓰이는지 확인하세요." : "이 Mac에 저장한 계정을 관리하세요.")
                     .font(.system(size: 12)).foregroundStyle(muted)
             }
             Spacer()
-            DockStripes().frame(height: 62).padding(.trailing, 12)
             Button { Task { await model.request(); await updates.refresh(); await model.refreshUsage() } } label: {
                 Label(model.busy ? "확인 중" : "새로고침", systemImage: "arrow.clockwise")
                     .font(.system(size: 11, weight: .medium)).padding(.horizontal, 4).padding(.vertical, 3)
@@ -296,7 +292,7 @@ struct Dashboard: View {
             HStack {
                 Label("OpenAI · 공유 계정", systemImage: "person.crop.circle").font(.system(size: 12, weight: .medium))
                 Spacer()
-                badge(model.connected ? "CONNECTED · 로컬 계정" : model.report?.codex.status == "signed_out" ? "로그아웃" : "확인 필요", green: model.connected)
+                badge(model.connected ? "저장소 계정" : model.report?.codex.status == "signed_out" ? "로그아웃" : "확인 필요", green: model.connected)
             }
             HStack(spacing: 15) {
                 Text(model.connected ? String((model.report?.codex.email ?? "A").prefix(1)).uppercased() : "—")
@@ -311,7 +307,7 @@ struct Dashboard: View {
             }
             Divider().opacity(0.5)
             HStack {
-                Text("앱별 연결을 분리하기 전까지 공유 저장소를 관리합니다.")
+                Text("아래 로그인·로그아웃은 공유 저장소에 적용됩니다.")
                     .font(.system(size: 11)).foregroundStyle(muted)
                 Spacer()
                 if model.connected {
@@ -325,28 +321,18 @@ struct Dashboard: View {
     }
     private var targets: some View {
         VStack(alignment: .leading, spacing: 13) {
-            sectionTitle("사용 환경", detail: "앱별 실제 계정은 아직 대조 전입니다")
-            HStack(spacing: 13) {
-                target("ChatGPT", subtitle: "macOS · " + (updates.products.first { $0.id == "chatgpt" }?.installed ?? "미확인"), icon: "bubble.left.and.bubble.right")
-                target("VS Code", subtitle: "Codex · " + (updates.products.first { $0.id == "codex" }?.installed ?? "미확인"), icon: "chevron.left.forwardslash.chevron.right")
-            }
+            sectionTitle("앱별 계정", detail: "실행 중인 앱의 인증 저장소를 각각 확인합니다")
+            HStack(alignment: .top, spacing: 13) {
+                AppAccountCard(title: "ChatGPT", icon: "bubble.left.and.bubble.right",
+                    installed: updates.products.first { $0.id == "chatgpt" }?.installed,
+                    accounts: model.appAccounts.filter { $0.product == "chatgpt" })
+                AppAccountCard(title: "VS Code · Codex", icon: "chevron.left.forwardslash.chevron.right",
+                    installed: updates.products.first { $0.id == "codex" }?.installed,
+                    accounts: model.appAccounts.filter { $0.product == "codex" })
+            }.fixedSize(horizontal: false, vertical: true)
+            Text("저장소의 계정 정보입니다. 실행 중 세션은 아직 직접 확인하지 못하므로, 실제 앱에 표시된 계정과 다를 수 있습니다.")
+                .font(.system(size: 11)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
         }
-    }
-    private func target(_ title: String, subtitle: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 17) {
-            HStack(spacing: 10) {
-                Image(systemName: icon).font(.system(size: 16)).frame(width: 35, height: 35)
-                    .background(ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.system(size: 13, weight: .semibold))
-                    Text(subtitle).font(.system(size: 10)).foregroundStyle(muted)
-                }
-                Spacer()
-            }
-            HStack { Text("개별 계정 연결 준비 중").font(.system(size: 11)).foregroundStyle(muted); Spacer(); Image(systemName: "link").foregroundStyle(muted) }
-        }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
-            .background(.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(ink.opacity(0.07)))
     }
     private var presetSection: some View {
         VStack(alignment: .leading, spacing: 13) {
@@ -399,7 +385,6 @@ struct Dashboard: View {
         HStack {
             VStack(alignment: .leading, spacing: 5) {
                 Text("독립적으로 개발된 앱 · OpenAI 및 Anthropic의 공식 제품이 아닙니다.")
-                Text("Claude를 비롯한 다른 서비스도 순차적으로 지원할 예정입니다.")
             }
             Spacer()
             if let date = model.lastChecked { Text(date, style: .time) }

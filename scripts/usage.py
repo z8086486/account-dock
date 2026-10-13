@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Query a saved account in an ephemeral Codex process; credentials arrive only over stdin."""
+from decimal import Decimal, InvalidOperation
 import base64
 import json
 import math
@@ -35,11 +36,44 @@ def number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
-def normalize_limits(result):
+def limit_groups(result):
     groups = result.get('rateLimitsByLimitId')
-    if not isinstance(groups, dict) or not groups:
-        single = result.get('rateLimits')
-        groups = {single.get('limitId') or 'codex': single} if isinstance(single, dict) else {}
+    groups = dict(groups) if isinstance(groups, dict) else {}
+    single = result.get('rateLimits')
+    if isinstance(single, dict):
+        key = single.get('limitId') or 'codex'
+        # The compatibility view may carry credits omitted from the multi-bucket view.
+        groups[key] = {**single, **(groups.get(key) if isinstance(groups.get(key), dict) else {})}
+        if groups[key].get('credits') is None and single.get('credits') is not None:
+            groups[key]['credits'] = single['credits']
+    return groups
+
+
+def normalize_credits(result):
+    credits = []
+    for key, group in limit_groups(result).items():
+        if not isinstance(group, dict) or not isinstance(group.get('credits'), dict):
+            continue
+        value = group['credits']
+        balance = None
+        raw = value.get('balance')
+        if isinstance(raw, (str, int, float)) and not isinstance(raw, bool) and len(str(raw)) <= 64:
+            try:
+                numeric = Decimal(str(raw))
+                if numeric.is_finite() and 0 <= numeric <= Decimal('1e18') and -8 <= numeric.as_tuple().exponent <= 18:
+                    balance = format(numeric, 'f')
+            except (InvalidOperation, ValueError):
+                pass
+        state = ('unlimited' if value.get('unlimited') is True else 'balance' if balance is not None
+                 else 'empty' if value.get('hasCredits') is False else 'available' if value.get('hasCredits') is True else 'unknown')
+        credits.append({'id': str(key), 'bucket': group.get('limitName') or str(key), 'status': state, 'balance': balance})
+    resets = result.get('rateLimitResetCredits')
+    count = resets.get('availableCount') if isinstance(resets, dict) else None
+    return credits, count if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 1_000_000 else None
+
+
+def normalize_limits(result):
+    groups = limit_groups(result)
     windows = []
     for key, group in groups.items():
         if not isinstance(group, dict):
@@ -83,6 +117,7 @@ def read_usage(credential, binary=None, timeout=20):
             def send(value):
                 process.stdin.write((json.dumps(value) + '\n').encode())
             limits, activity = None, None
+            credits, reset_count = [], None
             received = set()
             try:
                 send({'id': 1, 'method': 'initialize', 'params': {
@@ -121,13 +156,14 @@ def read_usage(credential, binary=None, timeout=20):
                             if 'error' not in reply:
                                 if rid == 3:
                                     limits = normalize_limits(reply.get('result', {}))
+                                    credits, reset_count = normalize_credits(reply.get('result', {}))
                                 else:
                                     activity = normalize_activity(reply.get('result', {}))
                         if received == {3, 4}:
-                            return {'status': 'available' if limits or activity else 'unavailable',
-                                    'windows': limits or [], 'activity': activity or {}, 'checkedAt': time.time()}
-                if limits or activity:
-                    return {'status': 'partial', 'windows': limits or [], 'activity': activity or {}, 'checkedAt': time.time()}
+                            return {'status': 'available' if limits or activity or credits or reset_count is not None else 'unavailable',
+                                    'windows': limits or [], 'activity': activity or {}, 'credits': credits, 'resetCredits': reset_count, 'checkedAt': time.time()}
+                if limits or activity or credits or reset_count is not None:
+                    return {'status': 'partial', 'windows': limits or [], 'activity': activity or {}, 'credits': credits, 'resetCredits': reset_count, 'checkedAt': time.time()}
                 raise TimeoutError('Usage request timed out')
             finally:
                 selector.close()

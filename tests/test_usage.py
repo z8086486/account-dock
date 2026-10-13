@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from usage import external_auth, normalize_limits, normalize_activity, read_usage
+from usage import external_auth, normalize_limits, normalize_activity, normalize_credits, read_usage
 
 
 class UsageTests(unittest.TestCase):
@@ -68,6 +68,37 @@ for line in sys.stdin:
         self.assertEqual(result[0]['remainingPercent'], 0)
         self.assertEqual(normalize_activity({'summary': {'lifetimeTokens': 123, 'peakDailyTokens': -1,
                                                          'private': 'hidden'}}), {'lifetimeTokens':123})
+
+    def test_credit_balance_zero_unlimited_and_absence_are_distinct(self):
+        def credits(value):
+            return normalize_credits({'rateLimits': {'credits': value}})[0][0]
+        self.assertEqual(credits({'balance':'0','hasCredits':False})['balance'], '0')
+        self.assertEqual(credits({'balance':'1250.50','hasCredits':True})['status'], 'balance')
+        self.assertEqual(credits({'balance':'0','unlimited':True})['status'], 'unlimited')
+        self.assertEqual(credits({'hasCredits':True})['status'], 'available')
+        self.assertEqual(credits({'hasCredits':False})['status'], 'empty')
+        self.assertEqual(normalize_credits({}), ([], None))
+        self.assertEqual(credits({'balance':'NaN'})['status'], 'unknown')
+        self.assertEqual(credits({'balance':'0e99999999'})['status'], 'unknown')
+        self.assertEqual(credits({'balance':'private-value'})['balance'], None)
+
+    def test_credit_only_response_and_reset_count(self):
+        result = {'rateLimits': {'limitId':'codex', 'credits':{'balance':'12.5','hasCredits':True}},
+                  'rateLimitsByLimitId': {'codex': {'primary':None}},
+                  'rateLimitResetCredits': {'availableCount':3,'credits':[]}}
+        credits, count = normalize_credits(result)
+        self.assertEqual(len(credits),1)
+        self.assertEqual(credits[0]['balance'],'12.5')
+        self.assertEqual(count,3)
+        self.assertEqual(normalize_credits({'rateLimitResetCredits':{'availableCount':0}}),([],0))
+        binary = self.server(''' elif r['method']=='account/rateLimits/read':
+  print(json.dumps({'id':r['id'],'result':{'rateLimits':{'credits':{'balance':'12','hasCredits':True,'unlimited':False}}}}),flush=True)
+ elif r['method']=='account/usage/read':
+  print(json.dumps({'id':r['id'],'result':{}}),flush=True)
+''')
+        response = read_usage(self.credential,binary=binary,timeout=2)
+        self.assertEqual(response['status'],'available')
+        self.assertEqual(response['credits'][0]['balance'],'12')
 
     def test_unsupported_usage_is_not_zero_remaining(self):
         binary = self.server(''' elif r['method'] in ['account/rateLimits/read','account/usage/read']:

@@ -2,11 +2,13 @@
 
 현재는 개발 프리뷰입니다. GitHub에는 소스 코드를 공개하며, 일반 사용자용 DMG/APP 릴리즈는 인증 연동과 배포 경로를 검증한 뒤 공개합니다. macOS 앱 바이너리는 GitHub Releases로 배포하고, GitHub Packages는 사용하지 않습니다.
 
+정식 배포 전 완료 조건은 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)를 확인하세요.
+
 ## 버전의 기준
 
 `Sources/AccountDock/Resources/release.json`을 버전 정보의 원본으로 사용합니다.
 
-- `version`: Account Dock의 SemVer 버전. 현재 `0.4.0`.
+- `version`: Account Dock의 SemVer 버전. 현재 `0.5.0`.
 - `build`: 배포 후보마다 증가하는 정수. Sparkle의 업데이트 비교에 사용하는 `CFBundleVersion`으로 전달됩니다. 같은 빌드 번호를 재사용하지 않습니다.
 - `channel`: 현재 `preview`. 공개 안정판은 출시 검증 후 변경합니다.
 - `minimumMacOS`: 지원 macOS 하한.
