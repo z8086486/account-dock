@@ -1,0 +1,46 @@
+# Deny by default. Explicitly allow reviewed public project files below.
+/*
+!/.gitignore
+!/README.md
+!/Package.swift
+!/Sources/
+!/scripts/
+!/tests/
+
+/Sources/*
+!/Sources/AccountDock/
+/Sources/AccountDock/*
+!/Sources/AccountDock/main.swift
+
+/scripts/*
+!/scripts/doctor.py
+/tests/*
+!/tests/test_doctor.py
+
+# Private work records and local tooling (never publish).
+/docs/
+/.local/
+/.codex/
+/.claude/
+/.vscode/
+/.idea/
+AGENTS.md
+CLAUDE.md
+SKILL.md
+/tmp
+
+# Credentials, diagnostics, and generated artifacts.
+.env
+.env.*
+auth.json
+credentials.json
+*.pem
+*.key
+*.p12
+*.log
+.DS_Store
+.build/
+.swiftpm/
+dist/
+__pycache__/
+*.pyc
