@@ -1,0 +1,19 @@
+<?xml version="1.0" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Account Dock</title>
+        <item>
+            <title>0.9.6</title>
+            <pubDate>Tue, 13 Oct 2026 19:16:15 +0900</pubDate>
+            <sparkle:version>22</sparkle:version>
+            <sparkle:shortVersionString>0.9.6</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/z8086486/account-dock/releases/download/v0.9.6/AccountDock-0.9.6-arm64-preview.zip" length="2057798" type="application/octet-stream" sparkle:edSignature="biZYm2TNLIM6MHEWz/ftpyX605styVbkp647lW6ZjI0ws96oriFOw2ytqmJ8IX+ysXJPpPYhs4r8M6E7xGs7Aw=="></enclosure>
+        </item>
+    </channel>
+</rss><!-- sparkle-signatures:
+edSignature: jp8R5i2JbLiKg6MnkuWZ4Dvz8DbXL3ROda0ZQ7xYtOPBs9Oc3PSs5GUfcH6QH4CmDPODBbDxxFUqu0zGUjIcDA==
+length: 1146
+-->
