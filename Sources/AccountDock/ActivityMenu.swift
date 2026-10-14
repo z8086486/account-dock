@@ -123,7 +123,7 @@ final class ActivityMonitor: ObservableObject {
     }
 }
 
-/// Core Animation rotates a single cached Retina image; no frame timer or SwiftUI redraw loop.
+/// Animate only the live menu-bar button. Inactive-display replicas remain static.
 @MainActor
 final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
     private var item: NSStatusItem?
@@ -220,8 +220,8 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
         popover.contentViewController = NSHostingController(rootView: ActivityMenu(model: model, monitor: monitor))
         popover.contentSize = NSSize(width: 410, height: 710)
         popover.show(relativeTo: positioningView.bounds, of: positioningView, preferredEdge: .minY)
-        NSApp.activate(ignoringOtherApps: true)
-        popover.contentViewController?.view.window?.makeKey()
+        // Keep the current app/display active. Activating Account Dock here can bring its
+        // main window on another display forward; a transient popover needs no activation.
         outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
             Task { @MainActor in self?.popover.performClose(nil) }
         }
@@ -292,9 +292,6 @@ struct ActivityMenu: View {
                     Text(monitor.snapshot.active ? "작업 중" : "대기 중").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
                 Spacer()
-                Button { NSWorkspace.shared.open(Bundle.main.bundleURL) } label: {
-                    Image(systemName: "arrow.up.right.square")
-                }.buttonStyle(.plain).help("Account Dock 열기")
             }
             Picker("계정", selection: $selected) {
                 Text("등록된 계정 전체").tag("all")
