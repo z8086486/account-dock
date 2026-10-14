@@ -44,6 +44,24 @@ final class ActivityTests: XCTestCase {
         XCTAssertLessThan(MenuBarController.rotationDuration(conversations: 4), MenuBarController.rotationDuration(conversations: 2))
         XCTAssertEqual(MenuBarController.rotationDuration(conversations: 100), 0.8)
     }
+    @MainActor func testPopoverAnchorStaysOnClickedDisplay() {
+        let primaryButton = CGRect(x: 1300, y: 876, width: 28, height: 24)
+        for screen in [CGRect(x: -1920, y: 0, width: 1920, height: 1080),
+                       CGRect(x: 1440, y: 0, width: 1920, height: 1080),
+                       CGRect(x: 0, y: 900, width: 1920, height: 1080),
+                       CGRect(x: 0, y: -1080, width: 1920, height: 1080)] {
+            let click = CGPoint(x: screen.maxX - 100, y: screen.maxY - 12)
+            let rect = MenuBarController.anchorRect(click: click, screen: screen, button: primaryButton, size: primaryButton.size)
+            XCTAssertTrue(screen.contains(rect))
+            XCTAssertEqual(rect.midX, click.x)
+            XCTAssertEqual(rect.midY, click.y)
+        }
+        let sameScreen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        XCTAssertEqual(MenuBarController.anchorRect(click: CGPoint(x: 1310, y: 880), screen: sameScreen, button: primaryButton, size: primaryButton.size), primaryButton)
+        let edge = MenuBarController.anchorRect(click: CGPoint(x: -1919, y: 1079), screen: CGRect(x: -1920,y:0,width:1920,height:1080), button: nil, size: primaryButton.size)
+        XCTAssertEqual(edge.minX, -1920)
+        XCTAssertEqual(edge.maxY, 1080)
+    }
     func testLiveOwnershipRejectsConflictingAccounts() {
         let a = URL(fileURLWithPath: "/tmp/a.jsonl")
         let b = URL(fileURLWithPath: "/tmp/b.jsonl")

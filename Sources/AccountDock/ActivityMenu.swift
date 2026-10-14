@@ -128,6 +128,7 @@ final class ActivityMonitor: ObservableObject {
 final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
     private var item: NSStatusItem?
     private let popover = NSPopover()
+    private var positioningPanel: NSPanel?
     private var subscription: AnyCancellable?
     private var outsideMonitor: Any?
     private var localMonitor: Any?
@@ -143,7 +144,7 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
         let status = NSStatusBar.system.statusItem(withLength: 28)
         item = status
         guard let button = status.button else { return }
-        button.target = self; button.action = #selector(togglePanel)
+        button.target = self; button.action = #selector(statusItemClicked(_:))
         button.toolTip = "Account Dock · Codex 활동"
         button.setAccessibilityLabel("Account Dock · Codex 활동")
         // Keep native template rendering: AppKit supplies light/dark and inactive-display tint.
@@ -183,13 +184,43 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
         transform.m42 = pivot.y - sin(angle) * pivot.x - cos(angle) * pivot.y
         return transform
     }
-    @objc func togglePanel() {
+    /// Use global AppKit coordinates; display origins may be negative or vertically stacked.
+    static func anchorRect(click: CGPoint, screen: CGRect, button: CGRect?, size: CGSize) -> CGRect {
+        if let button, screen.contains(button), button.contains(click) { return button }
+        let width = min(max(1, size.width), screen.width)
+        let height = min(max(1, size.height), screen.height)
+        return CGRect(x: min(max(click.x - width / 2, screen.minX), screen.maxX - width),
+                      y: min(max(click.y - height / 2, screen.minY), screen.maxY - height),
+                      width: width, height: height)
+    }
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        // Capture before activation changes the key window, active display, or status-item replica.
+        showPanel(at: NSEvent.mouseLocation)
+    }
+    @objc func togglePanel() { showPanel(at: nil) }
+    private func showPanel(at click: CGPoint?) {
         if popover.isShown { popover.performClose(nil); return }
         guard let button = item?.button, let model, let monitor else { return }
+        let buttonRect = button.window.map { $0.convertToScreen(button.convert(button.bounds, to: nil)) }
+        let point = click ?? buttonRect.map { CGPoint(x: $0.midX, y: $0.midY) } ?? NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? button.window?.screen else { return }
+        let rect = Self.anchorRect(click: point, screen: screen.frame, button: buttonRect, size: button.bounds.size)
+        // A clear positioning window anchors the popover to the clicked display rather than the
+        // status item's canonical window, which can belong to another menu-bar replica.
+        let anchor = NSPanel(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        anchor.isReleasedWhenClosed = false
+        anchor.isOpaque = false; anchor.backgroundColor = .clear; anchor.hasShadow = false
+        anchor.ignoresMouseEvents = true; anchor.level = .statusBar
+        anchor.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        anchor.contentView = NSView(frame: CGRect(origin: .zero, size: rect.size))
+        anchor.setFrame(rect, display: false)
+        positioningPanel = anchor
+        anchor.orderFrontRegardless()
+        guard let positioningView = anchor.contentView else { return }
         popover.contentViewController = NSHostingController(rootView: ActivityMenu(model: model, monitor: monitor))
         popover.contentSize = NSSize(width: 410, height: 710)
+        popover.show(relativeTo: positioningView.bounds, of: positioningView, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
         outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
             Task { @MainActor in self?.popover.performClose(nil) }
@@ -213,6 +244,8 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
         if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
         outsideMonitor = nil; localMonitor = nil; resignObserver = nil
         popover.contentViewController = nil
+        positioningPanel?.orderOut(nil)
+        positioningPanel = nil
     }
 }
 
