@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct AccountDockApp: App {
+    @NSApplicationDelegateAdaptor(DockAppDelegate.self) private var appDelegate
     @StateObject private var updates = UpdateCenter()
     @StateObject private var model = DockModel()
     @StateObject private var activity = ActivityMonitor()
@@ -11,8 +12,10 @@ struct AccountDockApp: App {
            let image = NSImage(contentsOf: url) { NSApplication.shared.applicationIconImage = image }
     }
     var body: some Scene {
-        WindowGroup("Account Dock", id: "main") {
-            Dashboard(model: model).environmentObject(updates).onAppear { menuBar.install(model: model, monitor: activity) }
+        Window("Account Dock", id: "main") {
+            MainWindowContent(delegate: appDelegate) {
+                Dashboard(model: model).environmentObject(updates).onAppear { menuBar.install(model: model, monitor: activity) }
+            }
         }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 1120, height: 850)
@@ -20,6 +23,30 @@ struct AccountDockApp: App {
                 Button("Codex 활동 보기") { menuBar.togglePanel() }.keyboardShortcut("u", modifiers: [.command, .shift])
                 Button("Account Dock 업데이트 확인…") { updates.checkSelf() }.disabled(!updates.selfUpdateReady)
             } }
+    }
+}
+
+/// A menu-bar app stays running after its last window closes. A Dock click is a
+/// reopen event, not another launch; explicitly restore the single main scene.
+@MainActor
+final class DockAppDelegate: NSObject, NSApplicationDelegate {
+    var openMainWindow: (() -> Void)?
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openMainWindow?()
+        sender.activate(ignoringOtherApps: true)
+        return false
+    }
+}
+
+private struct MainWindowContent<Content: View>: View {
+    @Environment(\.openWindow) private var openWindow
+    let delegate: DockAppDelegate
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        content().onAppear {
+            delegate.openMainWindow = { openWindow(id: "main") }
+        }
     }
 }
 

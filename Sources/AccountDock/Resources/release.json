@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "version": "1.0.0",
-  "build": 40,
+  "version": "1.0.1",
+  "build": 41,
   "channel": "stable",
   "minimumMacOS": "14.0",
   "repository": "z8086486/account-dock",
