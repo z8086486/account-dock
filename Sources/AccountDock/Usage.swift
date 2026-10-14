@@ -171,8 +171,9 @@ struct AccountUsageView: View {
                         .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
                 if !compact, let lifetime = report.activity["lifetimeTokens"] {
-                    Text("누적 사용 토큰 · \(lifetime.formatted(.number.precision(.fractionLength(0))))")
+                    Text("Codex 조회 누적 토큰 · \(lifetime.formatted(.number.precision(.fractionLength(0))))")
                         .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                        .help("Codex account/usage/read에서 조회한 값입니다. 이 Mac의 로그 합계나 OpenAI API 청구 내역과는 다를 수 있습니다. 모델별 토큰 내역이 없어 비용으로 환산하지 않습니다.")
                 }
                 if let checked = report.checkedAt {
                     Text("확인 · \(Date(timeIntervalSince1970: checked).formatted(date: .omitted, time: .shortened)) · Codex 기준")

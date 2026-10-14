@@ -8,6 +8,7 @@ struct LocalLimitSample: Sendable, Codable {
 }
 
 struct ActivitySnapshot: Sendable {
+    var costs: [String: [String: TokenCost]] = [:]
     var limits: [String: LocalLimitSample] = [:]
     var days: [String: [String: Int64]] = [:]
     var activeAccounts: [String: Int] = [:]
@@ -18,6 +19,7 @@ struct ActivitySnapshot: Sendable {
     var updatedAt: Date?
     func filtered(accounts: Set<String>) -> ActivitySnapshot {
         var result = self
+        result.costs = costs.mapValues { $0.filter { accounts.contains($0.key) } }
         result.days = days.mapValues { $0.filter { accounts.contains($0.key) } }
         result.limits = limits.filter { accounts.contains($0.key) }
         result.activeAccounts = activeAccounts.filter { accounts.contains($0.key) }
@@ -29,6 +31,13 @@ struct ActivitySnapshot: Sendable {
         days.filter { day == nil || $0.key == day }.values.reduce(0) { result, accounts in
             result + (account.map { accounts[$0, default: 0] } ?? accounts.values.reduce(0, +))
         }
+    }
+    func cost(account: String? = nil, day: String? = nil) -> TokenCost {
+        var result = TokenCost()
+        for (date, accounts) in costs where day == nil || day == date {
+            for (id, value) in accounts where account == nil || account == id { result.add(value) }
+        }
+        return result
     }
     static func day(_ date: Date) -> String {
         let parts = Calendar.current.dateComponents([.year, .month, .day], from: date)
@@ -52,6 +61,9 @@ struct ActivityLogState: Sendable, Codable {
     var lastFinish = Date.distantPast
     var attributedAccount: String?
     var attributionStart: UInt64?
+    var model: String?
+    var costs: [String: [String: TokenCost]]?
+    var replayUntil: UInt64?
 
     mutating func observeOwner(_ owner: String?, at offset: UInt64) {
         if owner != attributedAccount {
@@ -64,6 +76,10 @@ struct ActivityLogState: Sendable, Codable {
               let payload = object["payload"] as? [String: Any] else { return }
         if object["type"] as? String == "session_meta" {
             if let id = payload["creator_account_id"] as? String, !id.isEmpty { account = id }
+            return
+        }
+        if object["type"] as? String == "turn_context" {
+            model = payload["model"] as? String
             return
         }
         guard object["type"] as? String == "event_msg", let type = payload["type"] as? String else { return }
@@ -92,7 +108,14 @@ struct ActivityLogState: Sendable, Codable {
         previousTotal = max(previousTotal, total)
         guard delta > 0, let date else { return }
         let resolved = (attributionStart.map { position >= $0 } ?? false) ? (attributedAccount ?? account) : account
-        days[ActivitySnapshot.day(date), default: [:]][resolved, default: 0] += delta
+        let day = ActivitySnapshot.day(date)
+        if position >= (replayUntil ?? 0) { days[day, default: [:]][resolved, default: 0] += delta }
+        if let last = info["last_token_usage"] as? [String: Any],
+           let cost = TokenPricing.estimate(model: model, usage: last, expected: delta) {
+            var all = costs ?? [:]
+            all[day, default: [:]][resolved, default: TokenCost()].add(cost)
+            costs = all
+        }
     }
     static func parseDate(_ text: String) -> Date? {
         // ISO8601 timestamps with and without fractional seconds; no shared mutable formatter.
@@ -106,7 +129,7 @@ struct ActivityLogState: Sendable, Codable {
         while let newline = pending.range(of: Data([10]), in: cursor..<pending.endIndex)?.lowerBound {
             let line = pending[cursor..<newline]
             if !oversizedLine && line.count <= 2_000_000 &&
-                (line.prefix(256).range(of: Data("\"event_msg\"".utf8)) != nil || line.prefix(256).range(of: Data("\"session_meta\"".utf8)) != nil) {
+                (line.prefix(256).range(of: Data("\"turn_context\"".utf8)) != nil || line.prefix(256).range(of: Data("\"event_msg\"".utf8)) != nil || line.prefix(256).range(of: Data("\"session_meta\"".utf8)) != nil) {
                 consume(Data(line), at: baseOffset + UInt64(cursor - pending.startIndex))
             }
             oversizedLine = false
@@ -134,8 +157,18 @@ actor ActivityScanner {
         if let cacheURL, let attrs = try? FileManager.default.attributesOfItem(atPath: cacheURL.path),
            (attrs[.size] as? NSNumber)?.intValue ?? Int.max < 20_000_000,
            let data = try? Data(contentsOf: cacheURL), let cache = try? JSONDecoder().decode(Cache.self, from: data),
-           cache.version == 1, cache.root == root.path {
-            files = Dictionary(uniqueKeysWithValues: cache.files.map { (URL(fileURLWithPath: $0.key), $0.value) })
+           [1, 2, 3].contains(cache.version), cache.root == root.path {
+            files = Dictionary(uniqueKeysWithValues: cache.files.map { path, original in
+                var state = original
+                if cache.version < 3 {
+                    state.costs = nil; state.model = nil
+                    // Re-read pricing metadata while retaining previously attributed token totals.
+                    state.replayUntil = max(state.replayUntil ?? 0, state.offset)
+                    state.offset = 0; state.previousTotal = 0; state.pending = Data()
+                    state.oversizedLine = false
+                }
+                return (URL(fileURLWithPath: path), state)
+            })
         }
     }
     func scan(root newRoot: URL, now: Date = Date()) -> ActivitySnapshot {
@@ -237,6 +270,9 @@ actor ActivityScanner {
             if let limit = state.limit, limit.date > (snapshot.limits[state.account]?.date ?? .distantPast) {
                 snapshot.limits[state.account] = limit
             }
+            for (day, accounts) in state.costs ?? [:] {
+                for (account, cost) in accounts { snapshot.costs[day, default: [:]][account, default: TokenCost()].add(cost) }
+            }
             for (day, accounts) in state.days {
                 for (account, tokens) in accounts { snapshot.days[day, default: [:]][account, default: 0] += tokens }
             }
@@ -249,7 +285,7 @@ actor ActivityScanner {
                 saved.pending = Data() // Never persist conversation text, even a partial line.
                 return (url.path, saved)
             })
-            if let data = try? JSONEncoder().encode(Cache(version: 1, root: root.path, files: sanitized)) {
+            if let data = try? JSONEncoder().encode(Cache(version: 3, root: root.path, files: sanitized)) {
                 try? fm.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true,
                     attributes: [.posixPermissions: 0o700])
                 try? data.write(to: cacheURL, options: .atomic)

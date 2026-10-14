@@ -122,3 +122,8 @@ __pycache__/
 
 # Registered-account activity panel with fictional screenshot data.
 !/assets/activity.png
+
+# Reviewed API-equivalent cost calculation and tests.
+!/Sources/AccountDock/TokenCost.swift
+!/tests/AccountDockTests/TokenCostTests.swift
+!/Sources/AccountDock/PricingStore.swift

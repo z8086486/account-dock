@@ -153,7 +153,7 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
         button.image = image
         button.imagePosition = .imageOnly
         button.wantsLayer = true
-        popover.behavior = .transient; popover.animates = false; popover.delegate = self
+        popover.behavior = .applicationDefined; popover.animates = false; popover.delegate = self
         subscription = monitor.$snapshot.map { $0.active ? max(1, $0.activeAccounts.values.reduce(0, +)) : 0 }.removeDuplicates().sink { [weak self] count in
             self?.setRunning(count)
         }
@@ -218,18 +218,24 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
         anchor.orderFrontRegardless()
         guard let positioningView = anchor.contentView else { return }
         popover.contentViewController = NSHostingController(rootView: ActivityMenu(model: model, monitor: monitor))
-        popover.contentSize = NSSize(width: 410, height: 710)
+        popover.contentSize = NSSize(width: 370, height: 650)
         popover.show(relativeTo: positioningView.bounds, of: positioningView, preferredEdge: .minY)
         // Keep the current app/display active. Activating Account Dock here can bring its
         // main window on another display forward; a transient popover needs no activation.
         outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
-            Task { @MainActor in self?.popover.performClose(nil) }
+            Task { @MainActor in
+                guard let self else { return }
+                // A replicated status-item click belongs to the toggle action, not dismissal.
+                if self.positioningPanel?.frame.contains(NSEvent.mouseLocation) == true { return }
+                self.popover.performClose(nil)
+            }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]) { [weak self] event in
             guard let self else { return event }
             if event.type == .keyDown {
                 if event.keyCode == 53 { self.popover.performClose(nil); return nil }
-            } else if event.window !== self.popover.contentViewController?.view.window && event.window !== self.item?.button?.window {
+            } else if event.window !== self.popover.contentViewController?.view.window && event.window !== self.item?.button?.window
+                        && event.window?.styleMask.contains(.titled) == true {
                 self.popover.performClose(nil)
             }
             return event
@@ -253,6 +259,7 @@ struct ActivityMenu: View {
     @ObservedObject var model: DockModel
     @ObservedObject var monitor: ActivityMonitor
     @State private var selected = "all"
+    @State private var activityDetails = false
     @StateObject private var panel = ActivityPanelWindow()
     @State private var failures = 0
     @State private var lastAutomatic = Date.distantPast
@@ -284,11 +291,11 @@ struct ActivityMenu: View {
             credits: local.credits, resetCredits: server?.resetCredits, checkedAt: local.checkedAt)
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Image(nsImage: WheelIcon.image(size: 24))
+                Image(nsImage: WheelIcon.image(size: 21))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Codex 활동").font(.system(size: 17, weight: .semibold))
+                    Text("Codex 활동").font(.system(size: 15, weight: .semibold))
                     Text(monitor.snapshot.active ? "작업 중" : "대기 중").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
                 Spacer()
@@ -297,11 +304,22 @@ struct ActivityMenu: View {
                 Text("등록된 계정 전체").tag("all")
                 ForEach(accounts, id: \.id) { Text($0.name).tag($0.id) }
             }.labelsHidden()
-            HStack(spacing: 12) {
-                metric("오늘 토큰", value: visibleSnapshot.tokens(account: selectedAccount, day: ActivitySnapshot.day(Date())))
-                metric("누적 토큰", value: visibleSnapshot.tokens(account: selectedAccount))
+            HStack(spacing: 8) {
+                metric("오늘 · 이 Mac", value: visibleSnapshot.tokens(account: selectedAccount, day: ActivitySnapshot.day(Date())))
+                metric("누적 · 이 Mac", value: visibleSnapshot.tokens(account: selectedAccount))
             }
+            ScrollView {
+              VStack(alignment: .leading, spacing: 8) {
+                Button { activityDetails.toggle() } label: {
+                    HStack {
+                        Text("활동 기록 · API 환산")
+                        Spacer()
+                        Image(systemName: activityDetails ? "chevron.up" : "chevron.down")
+                    }.font(.system(size: 12, weight: .medium)).padding(.vertical, 5).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                if activityDetails {
             ActivityHeatmap(snapshot: visibleSnapshot, account: selectedAccount)
+            TokenCostView(snapshot: visibleSnapshot, account: selectedAccount)
             HStack {
                 Text(monitor.snapshot.indexing ? "로컬 기록 집계 중…" : "이 Mac의 로컬 기록 기준")
                 Spacer()
@@ -310,6 +328,7 @@ struct ActivityMenu: View {
             if monitor.snapshot.unreadableFiles > 0 {
                 Text("일부 기록을 읽을 수 없습니다.").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
             }
+                }
             Divider()
             HStack {
                 Text("남은 한도 · 크레딧").font(.system(size: 13, weight: .semibold))
@@ -321,8 +340,7 @@ struct ActivityMenu: View {
                     .buttonStyle(.plain).help("지금 사용량 조회")
                     .disabled(model.refreshingUsage || model.busy || !usageEnabled || model.presets.isEmpty)
             }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 10) {
                     if !usageEnabled { Text("온라인 사용량 조회가 꺼져 있습니다.") }
                     else if model.presets.isEmpty { Text("Account Dock에서 계정을 추가하세요.") }
                     ForEach(model.presets.filter { selected == "all" || accountID($0) == selected }) { preset in
@@ -338,7 +356,7 @@ struct ActivityMenu: View {
                             }
                             if let id = accountID(preset) {
                                 if visibleSnapshot.days.values.contains(where: { $0[id] != nil }) {
-                                    Text("오늘 \(visibleSnapshot.tokens(account: id, day: ActivitySnapshot.day(Date())).formatted()) · 누적 \(visibleSnapshot.tokens(account: id).formatted()) 토큰")
+                                    Text("이 Mac · 오늘 \(visibleSnapshot.tokens(account: id, day: ActivitySnapshot.day(Date())).formatted()) · 누적 \(visibleSnapshot.tokens(account: id).formatted()) 토큰")
                                         .foregroundStyle(DockTheme.muted)
                                 } else {
                                     Text("집계된 토큰 기록 없음 · 계정 확인 이후 기록부터 반영")
@@ -346,19 +364,20 @@ struct ActivityMenu: View {
                                 }
                             }
                             if usageEnabled { AccountUsageView(report: report(preset), loading: report(preset) == nil && model.usageLoading.contains(preset.id), compact: true) }
-                        }.font(.system(size: 12)).padding(14)
+                        }.font(.system(size: 12)).padding(12)
                             .background(.white, in: RoundedRectangle(cornerRadius: 12))
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(maxHeight: 220)
+              }.padding(.top, 4)
+            }
             HStack {
-                Text("등록된 계정의 식별 가능한 로컬 기록만 집계합니다. 작업 중인 Codex의 한도 정보는 자동 반영됩니다.")
+                Text("등록한 계정의 로컬 기록")
                 .font(.system(size: 11)).foregroundStyle(DockTheme.muted).fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 Button("종료") { NSApp.terminate(nil) }.buttonStyle(.plain).font(.system(size: 12)).fixedSize()
             }
         }
-        .padding(20).frame(width: 410).background(DockTheme.canvas)
+        .padding(14).frame(width: 370, height: 650).background(DockTheme.canvas)
         .foregroundStyle(DockTheme.navy).preferredColorScheme(.light)
         .background(ActivityPanelReader(panel: panel).frame(width: 0, height: 0))
         .onChange(of: accounts.map(\.id)) { _, ids in
@@ -386,15 +405,17 @@ struct ActivityMenu: View {
         }
     }
     private func metric(_ title: String, value: Int64) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 12)).foregroundStyle(DockTheme.muted)
-            Text(value.formatted()).font(.system(size: 21, weight: .semibold, design: .rounded)).monospacedDigit().minimumScaleFactor(0.6).lineLimit(1)
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+            Text(value.formatted()).font(.system(size: 17, weight: .semibold, design: .rounded)).monospacedDigit().minimumScaleFactor(0.6).lineLimit(1)
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(9)
             .background(DockTheme.blue.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
 struct ActivityHeatmap: View {
+    @State private var hoveredIndex: Int?
+    @ObservedObject private var pricing = PricingStore.shared
     let snapshot: ActivitySnapshot
     let account: String?
     private var dates: [Date] {
@@ -418,21 +439,36 @@ struct ActivityHeatmap: View {
                             let opacity = value == 0 ? 0.07 : 0.25 + 0.75 * sqrt(Double(value) / Double(maximum))
                             RoundedRectangle(cornerRadius: 2)
                                 .fill(date > Date() ? .clear : DockTheme.navy.opacity(opacity))
-                                .frame(width: 13, height: 13)
-                                .help("\(date.formatted(date: .abbreviated, time: .omitted)) · \(value.formatted()) 토큰")
+                                .frame(width: 10, height: 10)
+                                .onHover { inside in
+                                    if date <= Date() { hoveredIndex = inside ? week * 7 + weekday : nil }
+                                }
                                 .accessibilityLabel("\(ActivitySnapshot.day(date)), \(value) 토큰")
                         }
                     }
                 }
             }
-            HStack(spacing: 4) {
-                Spacer(); Text("적음")
-                ForEach([0.07, 0.25, 0.5, 0.75, 1.0], id: \.self) { opacity in
-                    RoundedRectangle(cornerRadius: 2).fill(DockTheme.navy.opacity(opacity)).frame(width: 10, height: 10)
+            .overlay(alignment: .topLeading) {
+                if let index = hoveredIndex {
+                    let day = ActivitySnapshot.day(days[index])
+                    let tokens = snapshot.tokens(account: account, day: day)
+                    let cost = snapshot.cost(account: account, day: day)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(day).fontWeight(.semibold)
+                        Text("\(tokens.formatted()) 토큰")
+                        Text(pricing.label(cost))
+                        if pricing.value(cost).tokens < tokens { Text("확인된 기록만 환산").foregroundStyle(.secondary) }
+                    }
+                    .font(.system(size: 11)).monospacedDigit().padding(9)
+                    .frame(width: 215, alignment: .leading)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(DockTheme.muted.opacity(0.2)))
+                    .shadow(color: .black.opacity(0.15), radius: 5, y: 2)
+                    .offset(x: min(max(CGFloat(index / 7) * 14 - 100, 0), 100), y: index % 7 < 4 ? CGFloat(index % 7) * 14 + 14 : CGFloat(index % 7) * 14 - 88)
+                    .allowsHitTesting(false)
                 }
-                Text("많음")
-            }.font(.system(size: 10)).foregroundStyle(DockTheme.muted)
-        }
+            }.zIndex(10)
+        }.zIndex(10)
     }
 }
 

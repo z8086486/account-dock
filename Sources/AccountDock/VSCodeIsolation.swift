@@ -73,7 +73,7 @@ enum VSCodeIsolation {
             let (args, environment) = try AppIdentityReader.arguments(app.processIdentifier)
             if matchesCloseTarget(args: args, environment: environment, workspace: workspace) { targets.append(app) }
         }
-        guard !targets.isEmpty else { throw DockError.message("닫을 계정별 VS Code 인스턴스가 없습니다. 새로고침해 주세요.") }
+        guard !targets.isEmpty else { return true }
         // Fail closed if the environment is ambiguous; never close all apps sharing the bundle ID.
         guard targets.count == 1, let app = targets.first, !app.isTerminated else {
             throw DockError.message("계정별 인스턴스를 하나로 확인하지 못해 닫지 않았습니다.")
@@ -83,11 +83,22 @@ enum VSCodeIsolation {
             throw DockError.message("계정별 VS Code 창에 종료를 요청하지 못했습니다.")
         }
         for _ in 0..<40 {
-            if app.isTerminated { return true }
+            if app.isTerminated || (kill(app.processIdentifier, 0) != 0 && errno == ESRCH) { return true }
             try await Task.sleep(for: .milliseconds(250))
         }
         // The editor may show a save prompt or the user may cancel. Never escalate to forceTerminate.
-        return app.isTerminated
+        return app.isTerminated || (kill(app.processIdentifier, 0) != 0 && errno == ESRCH)
+    }
+    static func editorIsRunning(home path: String?) throws -> Bool {
+        let workspace = try closeWorkspace(for: path)
+        let executable = URL(fileURLWithPath: AppIdentityReader.editor + "MacOS/Code")
+        for app in NSRunningApplication.runningApplications(withBundleIdentifier: "com.microsoft.VSCode") {
+            guard !app.isTerminated, app.executableURL == executable else { continue }
+            if kill(app.processIdentifier, 0) != 0 && errno == ESRCH { continue }
+            let (args, environment) = try AppIdentityReader.arguments(app.processIdentifier)
+            if matchesCloseTarget(args: args, environment: environment, workspace: workspace) { return true }
+        }
+        return false
     }
     static func requireMatchingIdentity(_ credential: Data?, preset: AccountPreset) throws {
         guard let credential,

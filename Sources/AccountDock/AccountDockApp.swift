@@ -36,6 +36,7 @@ final class DockModel: ObservableObject {
     @Published var usageLoading: Set<String> = []
     @Published var refreshingUsage = false
     private var connection: CodexConnection?
+    private var pendingCloseTask: Task<Void, Never>?
     @Published var addingAccount = false
     @Published var canCancelLogin = false
     @Published var waitingForKeychain = false
@@ -169,12 +170,31 @@ final class DockModel: ObservableObject {
         guard !busy, !refreshingUsage else { return }
         busy = true
         defer { busy = false }
+        pendingCloseTask?.cancel()
         message = "계정별 VS Code 창에 종료를 요청하고 있습니다."
         do {
             guard account.product == "codex" else { throw DockError.message("계정별 VS Code만 닫을 수 있습니다.") }
             let closed = try await VSCodeIsolation.close(home: account.home)
             appAccounts = try await AppIdentityReader.read().accounts
-            message = closed ? "계정별 VS Code 창을 닫았습니다." : "VS Code가 아직 열려 있습니다. 저장 확인 창이나 종료 취소 여부를 확인하세요."
+            if closed || (try? VSCodeIsolation.editorIsRunning(home: account.home)) == false {
+                message = "계정별 VS Code 창을 닫았습니다."
+            } else {
+                let pending = "이 계정의 VS Code 종료를 확인 중입니다. 저장 확인 창이 있으면 처리해 주세요."
+                message = pending
+                pendingCloseTask = Task { [weak self] in
+                    for _ in 0..<120 {
+                        do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                        guard let self, self.message == pending else { return }
+                        if (try? VSCodeIsolation.editorIsRunning(home: account.home)) == false {
+                            self.appAccounts = (try? await AppIdentityReader.read().accounts) ?? self.appAccounts
+                            self.message = "계정별 VS Code 창을 닫았습니다."
+                            return
+                        }
+                    }
+                    guard let self, self.message == pending else { return }
+                    self.message = "종료 확인이 지연되고 있습니다. 해당 계정의 저장 확인 창이나 종료 취소 여부를 확인한 뒤 새로고침해 주세요."
+                }
+            }
         } catch { message = error.localizedDescription }
     }
     func applyToVSCode(_ preset: AccountPreset) async {
