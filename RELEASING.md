@@ -47,6 +47,8 @@ python3 scripts/generate_update_feed.py
 5. 생성한 피드를 **수정하지 않고** `updates/appcast-arm64.xml`에 복사해 커밋합니다. 파일을 먼저 올리고 피드를 나중에 갱신해야 합니다.
 6. 이전 빌드에서 업데이트 확인 → 다운로드 → 설치·재실행을 검증합니다.
 
+1.0.0 이후 기본 업데이트 피드에는 정식 버전만 게시합니다. 프리뷰는 별도 피드로 분리해야 하며, GitHub의 prerelease 표시만으로 Sparkle 업데이트가 차단되지는 않습니다.
+
 피드 주소: `https://raw.githubusercontent.com/z8086486/account-dock/main/updates/appcast-arm64.xml`
 
 앱이 ARM64와 Intel을 모두 지원하게 되면 아키텍처별 피드와 산출물을 별도로 검증해야 합니다. 현재 Intel 배포 파일은 제공하지 않습니다.
