@@ -3,10 +3,10 @@ import AppKit
 @testable import AccountDock
 
 final class NativeTests: XCTestCase {
-    @MainActor func testPreviewReleaseSelectionRejectsDraftsAndForeignAssets() throws {
+    @MainActor func testReleaseSelectionRejectsDraftsAndForeignAssets() throws {
         func release(_ version: String, draft: Bool = false, preview: Bool = true,
                      arch: String = "arm64", host: String = "github.com") -> [String: Any] {
-            let name = "AccountDock-\(version)-\(arch)-preview.dmg"
+            let name = "AccountDock-\(version)-\(arch)" + (preview ? "-preview" : "") + ".dmg"
             return ["draft": draft, "prerelease": preview, "tag_name": "v" + version,
                 "assets": [["name": name, "state": "uploaded",
                     "browser_download_url": "https://\(host)/z8086486/account-dock/releases/download/v\(version)/\(name)"]]]

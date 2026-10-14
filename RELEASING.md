@@ -1,10 +1,10 @@
 # 배포 가이드
 
-Account Dock은 GitHub Releases에서 macOS 프리뷰를 배포합니다. 현재 Apple Silicon용이며, 앱 내 업데이트에는 Sparkle 2와 Ed25519 서명을 사용합니다. Apple Developer ID 서명·공증은 적용하지 않습니다. 프리뷰 앱과 계정 보관 모듈은 로컬 발급 코드 서명 인증서로 서명합니다. 이 인증서를 시스템 신뢰 루트에 추가하지 않습니다.
+Account Dock은 GitHub Releases에서 macOS 앱을 배포합니다. 현재 Apple Silicon용이며, 앱 내 업데이트에는 Sparkle 2와 Ed25519 서명을 사용합니다. Apple Developer ID 서명·공증은 적용하지 않습니다. 배포 앱과 계정 보관 모듈은 로컬 발급 코드 서명 인증서로 서명합니다. 이 인증서를 시스템 신뢰 루트에 추가하지 않습니다.
 
 ## 버전과 패키징
 
-`Sources/AccountDock/Resources/release.json`에서 `version`과 `build`를 증가시킵니다. Sparkle은 `build`를 비교하므로 반드시 이전 배포보다 큰 값을 사용합니다.
+`Sources/AccountDock/Resources/release.json`에서 `version`과 `build`를 증가시킵니다. 정식 배포는 `channel: stable`을 사용하며 파일명에 preview 접미사를 붙이지 않습니다. Sparkle은 `build`를 비교하므로 반드시 이전 배포보다 큰 값을 사용합니다.
 
 ```sh
 swift test
@@ -28,7 +28,7 @@ python3 scripts/package_app.py --dmg
 
 ## 업데이트 서명
 
-공개 키는 release.json의 `updatePublicKey`에, 개인 키는 배포 담당 Mac의 Keychain `app.accountdock.updates` 계정에 보관합니다. 개인 키·인증서·Keychain 내보내기를 Git에 넣지 마세요. 개인 키를 잃으면 기존 프리뷰에 업데이트를 배포할 수 없으므로 안전하게 관리해야 합니다.
+공개 키는 release.json의 `updatePublicKey`에, 개인 키는 배포 담당 Mac의 Keychain `app.accountdock.updates` 계정에 보관합니다. 개인 키·인증서·Keychain 내보내기를 Git에 넣지 마세요. 개인 키를 잃으면 기존 설치본에 업데이트를 배포할 수 없으므로 안전하게 관리해야 합니다.
 
 ```sh
 python3 scripts/generate_update_feed.py
@@ -41,7 +41,7 @@ python3 scripts/generate_update_feed.py
 ## GitHub 공개 순서
 
 1. 제품 소스와 버전을 검토·커밋하고 테스트합니다.
-2. 해당 커밋에 버전 태그를 붙이고 GitHub Pre-release를 만듭니다.
+2. 해당 커밋에 버전 태그를 붙이고 GitHub 정식 Release를 만듭니다.
 3. ZIP, DMG, SHA256SUMS, 생성한 `appcast-arm64.xml`을 업로드합니다.
 4. 공개 ZIP의 체크섬과 서명을 확인합니다.
 5. 생성한 피드를 **수정하지 않고** `updates/appcast-arm64.xml`에 복사해 커밋합니다. 파일을 먼저 올리고 피드를 나중에 갱신해야 합니다.

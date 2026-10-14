@@ -16,9 +16,10 @@ def main():
     version = release['version']
     arch = platform.machine()
     directory = ROOT / 'dist' / f'{version}-{arch}'
-    archive = directory / f'AccountDock-{version}-{arch}-preview.zip'
+    suffix = '' if release.get('channel') == 'stable' else '-preview'
+    archive = directory / f'AccountDock-{version}-{arch}{suffix}.zip'
     if not archive.is_file():
-        raise SystemExit('Package the preview ZIP before generating its update feed.')
+        raise SystemExit('Package the release ZIP before generating its update feed.')
     tools = ROOT / '.build/artifacts/sparkle/Sparkle/bin'
     public_key = subprocess.check_output([tools / 'generate_keys', '--account', ACCOUNT, '-p'], text=True).strip()
     if public_key != release.get('updatePublicKey'):

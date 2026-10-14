@@ -63,7 +63,7 @@ enum VersionService {
             let version = String(tag.drop(while: { $0 == "v" }))
             for asset in release["assets"] as? [[String: Any]] ?? [] {
                 guard let name = asset["name"] as? String,
-                      ["AccountDock-\(version)-\(architecture)-preview.dmg", "AccountDock-\(version)-\(architecture)-signed.dmg"].contains(name),
+                      ["AccountDock-\(version)-\(architecture).dmg", "AccountDock-\(version)-\(architecture)-preview.dmg", "AccountDock-\(version)-\(architecture)-signed.dmg"].contains(name),
                       asset["state"] as? String == "uploaded",
                       let raw = asset["browser_download_url"] as? String,
                       let url = URL(string: raw), url.scheme == "https", url.host == "github.com",
@@ -74,7 +74,7 @@ enum VersionService {
         }
         return candidates.max { newer($1.version, $0.version) }
     }
-    static func previewDownload() async throws -> (version: String, download: URL)? {
+    static func releaseDownload() async throws -> (version: String, download: URL)? {
         var request = URLRequest(url: releaseAPI, timeoutInterval: 15)
         request.setValue("AccountDock-version-check", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")

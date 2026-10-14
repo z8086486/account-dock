@@ -4,7 +4,7 @@
 <h1 align="center">Account Dock</h1>
 <p align="center"><strong>Codex 계정별로 VS Code를 열고, 사용량을 확인하는 macOS 앱</strong></p>
 <p align="center">
-  <a href="https://github.com/z8086486/account-dock/releases"><img alt="최신 프리뷰" src="https://img.shields.io/github/v/release/z8086486/account-dock?include_prereleases&label=preview&color=FF6B24" /></a>
+  <a href="https://github.com/z8086486/account-dock/releases"><img alt="최신 버전" src="https://img.shields.io/github/v/release/z8086486/account-dock?label=release&color=FF6B24" /></a>
   <img alt="macOS 14 이상" src="https://img.shields.io/badge/macOS-14%2B-ADD8E6" />
   <img alt="Apple Silicon" src="https://img.shields.io/badge/Apple-Silicon-102A38" />
 </p>
@@ -36,7 +36,7 @@
 
 VS Code는 `/Applications`에 설치되어 있어야 합니다. Python·Xcode는 필요하지 않습니다.
 
-> 현재는 Apple 공증이 없는 프리뷰입니다. macOS 실행 확인과 첫 Keychain 접근 승인이 필요할 수 있습니다.
+> Apple Developer ID 서명·공증은 적용하지 않았습니다. macOS 실행 확인과 첫 Keychain 접근 승인이 필요할 수 있습니다.
 
 ## 사용법
 

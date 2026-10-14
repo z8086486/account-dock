@@ -60,16 +60,16 @@ final class UpdateCenter: NSObject, ObservableObject, SPUUpdaterDelegate {
         }
         return true
     }
-    func downloadPreview() async {
+    func downloadRelease() async {
         guard !busy else { return }
         busy = true
         defer { busy = false }
         do {
-            guard let release = try await VersionService.previewDownload() else {
+            guard let release = try await VersionService.releaseDownload() else {
                 message = "이 Mac용 설치 파일이 아직 공개되지 않았습니다."; return
             }
             guard !VersionService.newer(ReleaseConfiguration.current.version, release.version) else {
-                message = "설치된 앱이 공개된 프리뷰보다 최신입니다."; return
+                message = "설치된 앱이 공개된 버전보다 최신입니다."; return
             }
             guard NSWorkspace.shared.open(release.download) else {
                 throw DockError.message("다운로드 링크를 열지 못했습니다.")
@@ -133,7 +133,7 @@ struct UpdatePanel: View {
                         VStack(alignment: .leading, spacing: 5) {
                             if product.id == "accountdock" {
                                 Text("GitHub Releases · Build \(ReleaseConfiguration.current.build)")
-                                Text(center.selfUpdateReady ? "서명 검증 후 앱 안에서 업데이트합니다." : "무료 프리뷰 · GitHub에서 다운로드 후 직접 교체합니다.")
+                                Text(center.selfUpdateReady ? "서명 검증 후 앱 안에서 업데이트합니다." : "GitHub에서 다운로드 후 직접 교체합니다.")
                             } else {
                                 Text("확인한 버전: \(product.tested.joined(separator: ", "))")
                                 Text(product.scope)
@@ -145,7 +145,7 @@ struct UpdatePanel: View {
                             if center.selfUpdateReady {
                                 Button("앱 업데이트") { center.checkSelf() }.buttonStyle(DockButtonStyle()).disabled(center.busy)
                             } else {
-                                Button("프리뷰 다운로드") { Task { await center.downloadPreview() } }
+                                Button("설치 파일 다운로드") { Task { await center.downloadRelease() } }
                                     .buttonStyle(DockButtonStyle()).disabled(center.busy)
                             }
                         } else if product.id == "codex" {

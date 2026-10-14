@@ -103,8 +103,9 @@ def main():
     else:
         run('codesign', '--force', '--sign', preview_identity or '-', app)
     run('codesign', '--verify', '--deep', '--strict', app)
-    label = 'signed' if signed else 'preview'
-    stem = f"AccountDock-{release['version']}-{platform.machine()}-{label}"
+    label = 'development' if args.development else release.get('channel', 'preview')
+    suffix = '' if label == 'stable' else f'-{label}'
+    stem = f"AccountDock-{release['version']}-{platform.machine()}{suffix}"
     zip_path = destination / (stem + '.zip')
     run('ditto', '-c', '-k', '--keepParent', app, zip_path)
     artifacts = [zip_path]
