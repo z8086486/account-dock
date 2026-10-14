@@ -50,8 +50,16 @@ struct ActivityLogState: Sendable, Codable {
     var liveOnly = false
     var lastWork = Date.distantPast
     var lastFinish = Date.distantPast
+    var attributedAccount: String?
+    var attributionStart: UInt64?
 
-    mutating func consume(_ line: Data) {
+    mutating func observeOwner(_ owner: String?, at offset: UInt64) {
+        if owner != attributedAccount {
+            attributedAccount = owner
+            attributionStart = owner == nil ? nil : offset
+        }
+    }
+    mutating func consume(_ line: Data, at position: UInt64 = 0) {
         guard let object = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
               let payload = object["payload"] as? [String: Any] else { return }
         if object["type"] as? String == "session_meta" {
@@ -83,7 +91,8 @@ struct ActivityLogState: Sendable, Codable {
         let delta = max(0, total - previousTotal)
         previousTotal = max(previousTotal, total)
         guard delta > 0, let date else { return }
-        days[ActivitySnapshot.day(date), default: [:]][account, default: 0] += delta
+        let resolved = (attributionStart.map { position >= $0 } ?? false) ? (attributedAccount ?? account) : account
+        days[ActivitySnapshot.day(date), default: [:]][resolved, default: 0] += delta
     }
     static func parseDate(_ text: String) -> Date? {
         // ISO8601 timestamps with and without fractional seconds; no shared mutable formatter.
@@ -92,12 +101,13 @@ struct ActivityLogState: Sendable, Codable {
     }
     mutating func append(_ data: Data) {
         pending.append(data)
+        let baseOffset = offset >= UInt64(pending.count) ? offset - UInt64(pending.count) : 0
         var cursor = pending.startIndex
         while let newline = pending.range(of: Data([10]), in: cursor..<pending.endIndex)?.lowerBound {
             let line = pending[cursor..<newline]
             if !oversizedLine && line.count <= 2_000_000 &&
                 (line.prefix(256).range(of: Data("\"event_msg\"".utf8)) != nil || line.prefix(256).range(of: Data("\"session_meta\"".utf8)) != nil) {
-                consume(Data(line))
+                consume(Data(line), at: baseOffset + UInt64(cursor - pending.startIndex))
             }
             oversizedLine = false
             cursor = pending.index(after: newline)
@@ -170,6 +180,9 @@ actor ActivityScanner {
             var state = files[url] ?? ActivityLogState()
             if size < state.offset || (state.fileNumber != 0 && number != state.fileNumber) { state = ActivityLogState() }
             state.fileNumber = number
+            let oldOwner = state.attributedAccount
+            state.observeOwner(owners[url], at: size)
+            if oldOwner != state.attributedAccount { cacheDirty = true }
             if size > state.offset && budget > 0 {
                 do {
                     let handle = try FileHandle(forReadingFrom: url)
@@ -217,6 +230,10 @@ actor ActivityScanner {
                 }
             }
             if state.account != ActivitySnapshot.unknown { snapshot.observedAccounts.insert(state.account) }
+            if let owner = owners[url] { snapshot.observedAccounts.insert(owner) }
+            for accounts in state.days.values {
+                snapshot.observedAccounts.formUnion(accounts.keys.filter { $0 != ActivitySnapshot.unknown })
+            }
             if let limit = state.limit, limit.date > (snapshot.limits[state.account]?.date ?? .distantPast) {
                 snapshot.limits[state.account] = limit
             }

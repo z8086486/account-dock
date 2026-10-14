@@ -73,6 +73,33 @@ enum WheelIcon {
         image.isTemplate = false
         return image
     }
+    /// A single silhouette uses the menu bar's appearance, while the asymmetric valve marks rim rotation.
+    static func menuImage(size: CGFloat, color: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            let context = NSGraphicsContext.current!.cgContext
+            context.translateBy(x: rect.midX, y: rect.midY)
+            context.scaleBy(x: size / 100, y: size / 100)
+            color.setFill(); color.setStroke()
+            let rim = NSBezierPath(ovalIn: NSRect(x: -46, y: -46, width: 92, height: 92))
+            rim.lineWidth = 6; rim.stroke()
+            NSBezierPath(ovalIn: NSRect(x: -19, y: -19, width: 38, height: 38)).fill()
+            for index in 0..<8 {
+                context.saveGState(); context.rotate(by: CGFloat(index) * .pi / 4 + .pi / 8)
+                let spoke = NSBezierPath(roundedRect: NSRect(x: 13, y: -5, width: 31, height: 10), xRadius: 5, yRadius: 5)
+                spoke.fill(); context.restoreGState()
+            }
+            // Valve on the inner lip, readable even at 20 points.
+            NSBezierPath(roundedRect: NSRect(x: -3, y: -45, width: 6, height: 10), xRadius: 2, yRadius: 2).fill()
+            context.setBlendMode(.clear)
+            NSBezierPath(ovalIn: NSRect(x: -9, y: -9, width: 18, height: 18)).fill()
+            for index in 0..<4 {
+                let a = CGFloat(index) * .pi / 2 + .pi / 4
+                NSBezierPath(ovalIn: NSRect(x: cos(a) * 14 - 2.7, y: sin(a) * 14 - 2.7, width: 5.4, height: 5.4)).fill()
+            }
+            return true
+        }
+    }
+
 }
 
 @MainActor
@@ -96,44 +123,18 @@ final class ActivityMonitor: ObservableObject {
     }
 }
 
-@MainActor
-final class WheelStatusImage: NSView {
-    let rotor = CALayer()
-    override var isFlipped: Bool { true }
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.addSublayer(rotor)
-        rotor.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        rotor.contentsGravity = .resizeAspect
-        updateImage()
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    override func layout() {
-        super.layout()
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        rotor.bounds = CGRect(origin: .zero, size: bounds.size)
-        rotor.position = CGPoint(x: bounds.midX, y: bounds.midY)
-        CATransaction.commit()
-    }
-    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); updateImage() }
-    private func updateImage() {
-        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let image = WheelIcon.image(size: 60, color: dark ? .white : .black)
-        image.isTemplate = false
-        rotor.contents = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
-        rotor.contentsScale = 3
-    }
-}
-
 /// Core Animation rotates a single cached Retina image; no frame timer or SwiftUI redraw loop.
 @MainActor
 final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
     private var item: NSStatusItem?
     private let popover = NSPopover()
-    private var wheel: WheelStatusImage?
     private var subscription: AnyCancellable?
+    private var outsideMonitor: Any?
+    private var localMonitor: Any?
+    private var resignObserver: NSObjectProtocol?
+    static func rotationDuration(conversations: Int) -> Double {
+        max(0.8, 2.0 / sqrt(Double(max(1, conversations))))
+    }
     private weak var model: DockModel?
     private weak var monitor: ActivityMonitor?
     func install(model: DockModel, monitor: ActivityMonitor) {
@@ -145,35 +146,74 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
         button.target = self; button.action = #selector(togglePanel)
         button.toolTip = "Account Dock · Codex 활동"
         button.setAccessibilityLabel("Account Dock · Codex 활동")
-        let image = WheelStatusImage(frame: NSRect(x: 4, y: (button.bounds.height - 20) / 2, width: 20, height: 20))
-        image.autoresizingMask = [.minYMargin, .maxYMargin]
-        button.addSubview(image); wheel = image
+        // Keep native template rendering: AppKit supplies light/dark and inactive-display tint.
+        let image = WheelIcon.menuImage(size: 20, color: .black)
+        image.isTemplate = true
+        button.image = image
+        button.imagePosition = .imageOnly
+        button.wantsLayer = true
         popover.behavior = .transient; popover.animates = false; popover.delegate = self
-        subscription = monitor.$snapshot.map(\.active).removeDuplicates().sink { [weak self] active in
-            self?.setRunning(active)
+        subscription = monitor.$snapshot.map { $0.active ? max(1, $0.activeAccounts.values.reduce(0, +)) : 0 }.removeDuplicates().sink { [weak self] count in
+            self?.setRunning(count)
         }
         monitor.start()
     }
-    private func setRunning(_ active: Bool) {
-        guard let layer = wheel?.rotor else { return }
-        if active {
-            let spin = CABasicAnimation(keyPath: "transform.rotation.z")
-            // Layer coordinates in this view are flipped: positive rotation moves the top to the right.
-            spin.fromValue = 0; spin.toValue = Double.pi * 2
-            spin.duration = 2.4; spin.repeatCount = .infinity
+    private func setRunning(_ count: Int) {
+        guard let layer = item?.button?.layer else { return }
+        if count > 0 {
+            let spin = CAKeyframeAnimation(keyPath: "transform")
+            let phase = layer.presentation().map { atan2($0.transform.m12, $0.transform.m11) } ?? 0
+            // Native status-button layer coordinates are unflipped: negative angles turn clockwise.
+            // Rotate around the visual center without changing AppKit's backing-layer anchor.
+            let pivot = CGPoint(x: layer.bounds.width * (0.5 - layer.anchorPoint.x),
+                                y: layer.bounds.height * (0.5 - layer.anchorPoint.y))
+            spin.values = (0...64).map { step in
+                NSValue(caTransform3D: Self.centeredRotation(angle: phase - CGFloat(step) * .pi * 2 / 64, pivot: pivot))
+            }
+            spin.duration = Self.rotationDuration(conversations: count); spin.repeatCount = .infinity
+            spin.calculationMode = .linear
             spin.timingFunction = CAMediaTimingFunction(name: .linear)
             layer.add(spin, forKey: "codexWorking")
         } else { layer.removeAnimation(forKey: "codexWorking") }
-        item?.button?.toolTip = active ? "Account Dock · Codex 작업 중" : "Account Dock · 대기 중"
+        item?.button?.toolTip = count > 0 ? "Account Dock · Codex 작업 중" : "Account Dock · 대기 중"
+    }
+    static func centeredRotation(angle: CGFloat, pivot: CGPoint) -> CATransform3D {
+        var transform = CATransform3DMakeRotation(angle, 0, 0, 1)
+        transform.m41 = pivot.x - cos(angle) * pivot.x + sin(angle) * pivot.y
+        transform.m42 = pivot.y - sin(angle) * pivot.x - cos(angle) * pivot.y
+        return transform
     }
     @objc func togglePanel() {
         if popover.isShown { popover.performClose(nil); return }
         guard let button = item?.button, let model, let monitor else { return }
         popover.contentViewController = NSHostingController(rootView: ActivityMenu(model: model, monitor: monitor))
         popover.contentSize = NSSize(width: 410, height: 710)
+        NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+        outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
+            Task { @MainActor in self?.popover.performClose(nil) }
+        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]) { [weak self] event in
+            guard let self else { return event }
+            if event.type == .keyDown {
+                if event.keyCode == 53 { self.popover.performClose(nil); return nil }
+            } else if event.window !== self.popover.contentViewController?.view.window && event.window !== self.item?.button?.window {
+                self.popover.performClose(nil)
+            }
+            return event
+        }
+        resignObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.popover.performClose(nil) }
+        }
     }
-    func popoverDidClose(_ notification: Notification) { popover.contentViewController = nil }
+    func popoverDidClose(_ notification: Notification) {
+        if let outsideMonitor { NSEvent.removeMonitor(outsideMonitor) }
+        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        outsideMonitor = nil; localMonitor = nil; resignObserver = nil
+        popover.contentViewController = nil
+    }
 }
 
 struct ActivityMenu: View {
@@ -267,8 +307,13 @@ struct ActivityMenu: View {
                                 }
                             }
                             if let id = accountID(preset) {
-                                Text("오늘 \(visibleSnapshot.tokens(account: id, day: ActivitySnapshot.day(Date())).formatted()) · 누적 \(visibleSnapshot.tokens(account: id).formatted()) 토큰")
-                                    .foregroundStyle(DockTheme.muted)
+                                if visibleSnapshot.days.values.contains(where: { $0[id] != nil }) {
+                                    Text("오늘 \(visibleSnapshot.tokens(account: id, day: ActivitySnapshot.day(Date())).formatted()) · 누적 \(visibleSnapshot.tokens(account: id).formatted()) 토큰")
+                                        .foregroundStyle(DockTheme.muted)
+                                } else {
+                                    Text("집계된 토큰 기록 없음 · 계정 확인 이후 기록부터 반영")
+                                        .foregroundStyle(DockTheme.muted)
+                                }
                             }
                             if usageEnabled { AccountUsageView(report: report(preset), loading: report(preset) == nil && model.usageLoading.contains(preset.id), compact: true) }
                         }.font(.system(size: 12)).padding(14)

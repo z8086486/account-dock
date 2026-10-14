@@ -10,6 +10,40 @@ final class ActivityTests: XCTestCase {
     private func count(_ total: Int) throws -> Data {
         try line("event_msg", ["type": "token_count", "info": ["total_token_usage": ["total_tokens": total]]])
     }
+    func testRuntimeOwnerCountsOnlyObservedFutureUsage() throws {
+        var state = ActivityLogState()
+        state.observeOwner("work", at: 100)
+        state.consume(try count(100), at: 50)
+        state.consume(try count(140), at: 100)
+        XCTAssertEqual(state.days.values.reduce(0) { $0 + $1["work", default: 0] }, 40)
+        XCTAssertEqual(state.days.values.reduce(0) { $0 + $1[ActivitySnapshot.unknown, default: 0] }, 100)
+        state.observeOwner("personal", at: 200)
+        state.consume(try count(160), at: 210)
+        XCTAssertEqual(state.days.values.reduce(0) { $0 + $1["personal", default: 0] }, 20)
+        let restored = try JSONDecoder().decode(ActivityLogState.self, from: JSONEncoder().encode(state))
+        XCTAssertEqual(restored.attributedAccount, "personal")
+        XCTAssertEqual(restored.attributionStart, 200)
+    }
+    func testRuntimeAttributionSurvivesSplitLineWithoutBackfill() throws {
+        var state = ActivityLogState()
+        let baseline = try count(100)
+        state.offset += UInt64(baseline.count); state.append(baseline)
+        state.observeOwner("work", at: state.offset)
+        let next = try count(135)
+        state.offset += 12; state.append(Data(next.prefix(12)))
+        state.offset += UInt64(next.count - 12); state.append(Data(next.dropFirst(12)))
+        XCTAssertEqual(state.days.values.reduce(0) { $0 + $1["work", default: 0] }, 35)
+        state.observeOwner(nil, at: state.offset)
+        let unknown = try count(145)
+        state.offset += UInt64(unknown.count); state.append(unknown)
+        XCTAssertEqual(state.days.values.reduce(0) { $0 + $1["work", default: 0] }, 35)
+    }
+    @MainActor func testWheelSpeedIncreasesWithConversationCountAndIsCapped() {
+        XCTAssertEqual(MenuBarController.rotationDuration(conversations: 1), 2)
+        XCTAssertLessThan(MenuBarController.rotationDuration(conversations: 2), 2)
+        XCTAssertLessThan(MenuBarController.rotationDuration(conversations: 4), MenuBarController.rotationDuration(conversations: 2))
+        XCTAssertEqual(MenuBarController.rotationDuration(conversations: 100), 0.8)
+    }
     func testLiveOwnershipRejectsConflictingAccounts() {
         let a = URL(fileURLWithPath: "/tmp/a.jsonl")
         let b = URL(fileURLWithPath: "/tmp/b.jsonl")
@@ -116,17 +150,17 @@ final class ActivityTests: XCTestCase {
         XCTAssertEqual(second.activeAccounts, ["b": 1])
         XCTAssertTrue(second.active)
     }
-    @MainActor func testWheelRotationLayerKeepsItsCenterWhenViewRelayouts() {
-        let view = WheelStatusImage(frame: NSRect(x: 4, y: 2, width: 20, height: 20))
-        view.layout()
-        XCTAssertEqual(view.rotor.anchorPoint, CGPoint(x: 0.5, y: 0.5))
-        XCTAssertEqual(view.rotor.position, CGPoint(x: 10, y: 10))
-        XCTAssertTrue(view.rotor.superlayer === view.layer)
-        let original = view.frame
-        view.layout()
-        XCTAssertEqual(view.frame, original)
-        XCTAssertEqual(view.rotor.position, CGPoint(x: 10, y: 10))
-        XCTAssertNil(view.hitTest(CGPoint(x: 10, y: 10)))
+    @MainActor func testWheelRotationPreservesCenterForAppKitAnchorPoints() {
+        for anchor in [CGPoint.zero, CGPoint(x: 0.5, y: 0.5), CGPoint(x: 0, y: 1)] {
+            let pivot = CGPoint(x: 28 * (0.5 - anchor.x), y: 24 * (0.5 - anchor.y))
+            for step in -16...16 {
+                let transform = MenuBarController.centeredRotation(angle: CGFloat(step) * .pi / 8, pivot: pivot)
+                let x = pivot.x * transform.m11 + pivot.y * transform.m21 + transform.m41
+                let y = pivot.x * transform.m12 + pivot.y * transform.m22 + transform.m42
+                XCTAssertEqual(x, pivot.x, accuracy: 0.00001)
+                XCTAssertEqual(y, pivot.y, accuracy: 0.00001)
+            }
+        }
     }
     func testRegisteredAccountScopeExcludesUnknownAndRemovedAccounts() {
         let snapshot = ActivitySnapshot(limits: [:], days: ["2026-10-13": ["a": 100, "b": 200, ActivitySnapshot.unknown: 500]],
