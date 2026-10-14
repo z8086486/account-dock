@@ -4,7 +4,7 @@
 <h1 align="center">Account Dock</h1>
 <p align="center"><strong>Codex 계정별로 VS Code를 열고, 사용량을 확인하는 macOS 앱</strong></p>
 <p align="center">
-  <a href="https://github.com/z8086486/account-dock/releases"><img alt="최신 버전" src="https://img.shields.io/github/v/release/z8086486/account-dock?label=release&color=FF6B24" /></a>
+  <a href="https://github.com/z8086486/account-dock/releases"><img alt="최신 버전" src="https://img.shields.io/github/v/release/z8086486/account-dock?label=release&amp;color=FF6B24&amp;cacheSeconds=300&amp;v=1" /></a>
   <img alt="macOS 14 이상" src="https://img.shields.io/badge/macOS-14%2B-ADD8E6" />
   <img alt="Apple Silicon" src="https://img.shields.io/badge/Apple-Silicon-102A38" />
 </p>
