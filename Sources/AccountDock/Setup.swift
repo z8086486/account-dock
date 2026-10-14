@@ -89,7 +89,7 @@ struct SetupPanel: View {
                 Text("OpenAI에 계정별 사용량을 요청합니다.")
                     .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
             }.padding(18).background(.white, in: RoundedRectangle(cornerRadius: 13))
-            if !firstLaunch { StartupPanel() }
+            if !firstLaunch { WheelDesignPanel(); StartupPanel() }
             HStack {
                 Button(access.checking ? "확인 중…" : "접근 확인") { Task { await access.check() } }
                     .buttonStyle(DockButtonStyle()).disabled(access.checking)

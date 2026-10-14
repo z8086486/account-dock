@@ -35,7 +35,7 @@ struct StartupPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
-                Image(nsImage: WheelIcon.image(size: 42))
+                WheelPreview(size: 42)
                 Text("메뉴 막대에서 계속 사용").font(.system(size: 19, weight: .semibold))
             }
             Text("창을 닫아도 Codex 활동과 사용량을 확인할 수 있습니다. Mac에 로그인할 때 자동으로 시작하려면 자동 실행을 켜세요.")
@@ -58,5 +58,37 @@ struct StartupPanel: View {
         }.padding(22).background(.white, in: RoundedRectangle(cornerRadius: 14))
             .foregroundStyle(DockTheme.navy)
             .onChange(of: phase) { _, _ in settings.refresh() }.onAppear { settings.refresh() }
+    }
+}
+
+struct WheelPreview: View {
+    @AppStorage(WheelDesign.preferenceKey) private var selection = WheelDesign.classic.rawValue
+    var size: CGFloat
+    var body: some View {
+        Image(nsImage: WheelIcon.image(size: size, design: WheelDesign(rawValue: selection) ?? .classic))
+    }
+}
+
+struct WheelDesignPanel: View {
+    @AppStorage(WheelDesign.preferenceKey) private var selection = WheelDesign.classic.rawValue
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("메뉴바 휠").font(.system(size: 17, weight: .semibold))
+            HStack(spacing: 12) {
+                ForEach(WheelDesign.allCases) { design in
+                    Button { selection = design.rawValue } label: {
+                        VStack(spacing: 10) {
+                            Image(nsImage: WheelIcon.image(size: 64, design: design))
+                            Text(design.title).font(.system(size: 12, weight: .medium))
+                            Image(systemName: selection == design.rawValue ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selection == design.rawValue ? DockTheme.orange : DockTheme.muted)
+                        }.frame(maxWidth: .infinity).padding(.vertical, 16)
+                            .background(selection == design.rawValue ? DockTheme.canvas : .white, in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selection == design.rawValue ? DockTheme.orange : DockTheme.muted.opacity(0.2)))
+                    }.buttonStyle(.plain).accessibilityLabel(design.title)
+                        .accessibilityAddTraits(selection == design.rawValue ? .isSelected : [])
+                }
+            }
+        }.padding(22).background(.white, in: RoundedRectangle(cornerRadius: 14))
     }
 }

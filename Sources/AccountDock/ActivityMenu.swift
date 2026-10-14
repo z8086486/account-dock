@@ -3,11 +3,22 @@ import AppKit
 import Combine
 import QuartzCore
 
+enum WheelDesign: String, CaseIterable, Identifiable {
+    case classic, meisterS1
+    static let preferenceKey = "accountDock.wheelDesign"
+    var id: String { rawValue }
+    var title: String { self == .classic ? "기본 · 8스포크" : "MEISTER S1 · 5스포크" }
+    static var current: WheelDesign {
+        WheelDesign(rawValue: UserDefaults.standard.string(forKey: preferenceKey) ?? "") ?? .classic
+    }
+}
+
 /// Eight rounded spokes, deep concentric rim, open hub and four bolt holes.
 /// Rendered at the display scale by AppKit; no downsampled photograph in the menu bar.
 @MainActor
 enum WheelIcon {
-    static func image(angle: CGFloat = 0, size: CGFloat = 20, color: NSColor = .black) -> NSImage {
+    static func image(angle: CGFloat = 0, size: CGFloat = 20, color: NSColor = .black, design: WheelDesign = .current) -> NSImage {
+        if design == .meisterS1 { return meister(size: size, angle: angle, color: color, template: false) }
         let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             color.setFill()
             let metal = NSGradient(colors: [NSColor(white: 0.16, alpha: 1), NSColor(white: 0.48, alpha: 1), NSColor(white: 0.11, alpha: 1)])!
@@ -74,8 +85,9 @@ enum WheelIcon {
         return image
     }
     /// A single silhouette uses the menu bar's appearance, while the asymmetric valve marks rim rotation.
-    static func menuImage(size: CGFloat, color: NSColor) -> NSImage {
-        NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+    static func menuImage(size: CGFloat, color: NSColor, design: WheelDesign = .current) -> NSImage {
+        if design == .meisterS1 { return meister(size: size, color: color, template: true) }
+        return NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             let context = NSGraphicsContext.current!.cgContext
             context.translateBy(x: rect.midX, y: rect.midY)
             context.scaleBy(x: size / 100, y: size / 100)
@@ -96,6 +108,62 @@ enum WheelIcon {
                 let a = CGFloat(index) * .pi / 2 + .pi / 4
                 NSBezierPath(ovalIn: NSRect(x: cos(a) * 14 - 2.7, y: sin(a) * 14 - 2.7, width: 5.4, height: 5.4)).fill()
             }
+            return true
+        }
+    }
+
+    /// Front elevation: five broad, flared spokes, recessed hub and bolted stepped lip.
+    private static func meister(size: CGFloat, angle: CGFloat = 0, color: NSColor, template: Bool) -> NSImage {
+        NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            let c = NSGraphicsContext.current!.cgContext
+            c.translateBy(x: rect.midX, y: rect.midY)
+            c.rotate(by: angle)
+            c.scaleBy(x: size / 100, y: size / 100)
+            let metal = NSGradient(colors: [.init(white: 0.68, alpha: 1), .init(white: 0.23, alpha: 1), .init(white: 0.53, alpha: 1)])!
+            func disc(_ radius: CGFloat) -> NSBezierPath {
+                NSBezierPath(ovalIn: NSRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2))
+            }
+            func fill(_ path: NSBezierPath) {
+                if template { color.setFill(); path.fill() } else { metal.draw(in: path, angle: 125) }
+            }
+            let rim = disc(49); rim.windingRule = .evenOdd; rim.appendOval(in: NSRect(x: -38, y: -38, width: 76, height: 76)); fill(rim)
+            if !template {
+                for (radius, width, shade) in [(48.0, 1.0, 0.85), (46.0, 1.2, 0.18), (44.8, 1.0, 0.8), (39.0, 0.9, 0.16)] {
+                    let ring = disc(radius); ring.lineWidth = width
+                    NSColor(white: shade, alpha: 1).setStroke(); ring.stroke()
+                }
+            }
+            let face = disc(21)
+            for i in 0..<5 {
+                let spoke = NSBezierPath()
+                spoke.move(to: NSPoint(x: 12, y: -11))
+                spoke.curve(to: NSPoint(x: 39, y: -8), controlPoint1: NSPoint(x: 23, y: -6), controlPoint2: NSPoint(x: 28, y: -7))
+                spoke.line(to: NSPoint(x: 39, y: 8))
+                spoke.curve(to: NSPoint(x: 12, y: 11), controlPoint1: NSPoint(x: 28, y: 7), controlPoint2: NSPoint(x: 23, y: 6))
+                spoke.close()
+                let t = AffineTransform(rotationByRadians: CGFloat(i) * .pi * 2 / 5 + .pi / 2)
+                spoke.transform(using: t); face.append(spoke)
+            }
+            fill(face)
+            if !template {
+                let seat = disc(19); seat.lineWidth = 1
+                NSColor(white: 0.15, alpha: 1).setStroke(); seat.stroke()
+            }
+            // Forty assembly bolts remain legible in the larger settings preview.
+            for i in 0..<40 {
+                let a = CGFloat(i) * .pi / 20
+                let bolt = NSBezierPath(ovalIn: NSRect(x: cos(a) * 41.3 - 1, y: sin(a) * 41.3 - 1, width: 2, height: 2))
+                if template { c.setBlendMode(.clear); bolt.fill(); c.setBlendMode(.normal) }
+                else { NSColor(white: 0.15, alpha: 1).setFill(); bolt.fill(); bolt.lineWidth = 0.45; NSColor(white: 0.9, alpha: 1).setStroke(); bolt.stroke() }
+            }
+            color.setFill()
+            NSBezierPath(roundedRect: NSRect(x: -2, y: -47, width: 4, height: 7), xRadius: 1, yRadius: 1).fill()
+            c.setBlendMode(.clear); disc(9).fill()
+            for i in 0..<5 {
+                let a = CGFloat(i) * .pi * 2 / 5 + .pi / 2
+                NSBezierPath(ovalIn: NSRect(x: cos(a) * 15 - 2.6, y: sin(a) * 15 - 2.6, width: 5.2, height: 5.2)).fill()
+            }
+            c.setBlendMode(.normal)
             return true
         }
     }
@@ -130,6 +198,8 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
     private let popover = NSPopover()
     private var positioningPanel: NSPanel?
     private var subscription: AnyCancellable?
+    private var designSubscription: AnyCancellable?
+    private var displayedDesign: WheelDesign?
     private var outsideMonitor: Any?
     private var localMonitor: Any?
     private var resignObserver: NSObjectProtocol?
@@ -148,9 +218,9 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
         button.toolTip = "Account Dock · Codex 활동"
         button.setAccessibilityLabel("Account Dock · Codex 활동")
         // Keep native template rendering: AppKit supplies light/dark and inactive-display tint.
-        let image = WheelIcon.menuImage(size: 20, color: .black)
-        image.isTemplate = true
-        button.image = image
+        updateDesign()
+        designSubscription = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: RunLoop.main).sink { [weak self] _ in self?.updateDesign() }
         button.imagePosition = .imageOnly
         button.wantsLayer = true
         popover.behavior = .applicationDefined; popover.animates = false; popover.delegate = self
@@ -158,6 +228,14 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
             self?.setRunning(count)
         }
         monitor.start()
+    }
+    private func updateDesign() {
+        let design = WheelDesign.current
+        guard displayedDesign != design else { return }
+        displayedDesign = design
+        let image = WheelIcon.menuImage(size: 20, color: .black, design: design)
+        image.isTemplate = true
+        item?.button?.image = image
     }
     private func setRunning(_ count: Int) {
         guard let layer = item?.button?.layer else { return }
@@ -293,7 +371,7 @@ struct ActivityMenu: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Image(nsImage: WheelIcon.image(size: 21))
+                WheelPreview(size: 21)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Codex 활동").font(.system(size: 15, weight: .semibold))
                     Text(monitor.snapshot.active ? "작업 중" : "대기 중").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
