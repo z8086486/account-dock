@@ -2,7 +2,7 @@
   <img src="assets/icon.png" width="104" alt="Account Dock" />
 </p>
 <h1 align="center">Account Dock</h1>
-<p align="center">macOS용 Codex 계정 관리자</p>
+<p align="center"><strong>Codex 계정별로 VS Code를 열고, 사용량을 확인하는 macOS 앱</strong></p>
 <p align="center">
   <a href="https://github.com/z8086486/account-dock/releases"><img alt="최신 프리뷰" src="https://img.shields.io/github/v/release/z8086486/account-dock?include_prereleases&label=preview&color=FF6B24" /></a>
   <img alt="macOS 14 이상" src="https://img.shields.io/badge/macOS-14%2B-ADD8E6" />
@@ -14,17 +14,15 @@
   <a href="ISOLATION.md">계정별 VS Code 안내</a>
 </p>
 
+개인 계정과 업무 계정처럼 **여러 Codex 계정을 함께 사용할 때** 계정별 로그인과 창을 관리합니다. 기존 VS Code는 그대로 두고, 등록한 다른 계정으로 별도의 VS Code를 열어 동시에 작업할 수 있습니다.
+
+- **계정별 VS Code** — 저장한 계정을 선택해 실행하고, 같은 계정으로 창을 추가합니다. 기존 테마와 로컬 대화도 연결합니다.
+- **사용 한도·크레딧** — 계정별 플랜과 남은 한도, 제공되는 크레딧 잔액을 확인합니다.
+- **메뉴 막대 활동** — Codex 작업 중에는 휠이 회전합니다. 클릭하면 계정별 작업 상태와 로컬 토큰 사용 기록을 확인할 수 있습니다.
+
 ![계정 관리](assets/accounts.png)
 
-## 기능
-
-- 계정 추가·이름 지정·macOS Keychain 저장
-- 계정별 플랜, Codex 사용 한도와 크레딧 조회
-- 메뉴 막대의 작업 표시, 계정별 활동 잔디와 오늘·누적 토큰
-- 창을 닫아도 실행 유지, Mac 로그인 시 자동 실행
-- 계정별 VS Code 실행과 같은 계정의 추가 창 열기
-- 기존 VS Code의 테마·로컬 대화 연결
-- 앱 안에서 업데이트 다운로드·설치·재실행
+계정은 macOS Keychain에 보관합니다. 로그인 시 자동 실행과 앱 내 업데이트를 지원합니다.
 
 ## 설치
 
