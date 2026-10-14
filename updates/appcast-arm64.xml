@@ -4,16 +4,16 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>Account Dock</title>
         <item>
-            <title>0.11.2</title>
-            <pubDate>Wed, 14 Oct 2026 13:59:14 +0900</pubDate>
-            <sparkle:version>32</sparkle:version>
-            <sparkle:shortVersionString>0.11.2</sparkle:shortVersionString>
+            <title>0.11.3</title>
+            <pubDate>Wed, 14 Oct 2026 14:05:25 +0900</pubDate>
+            <sparkle:version>34</sparkle:version>
+            <sparkle:shortVersionString>0.11.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/z8086486/account-dock/releases/download/v0.11.2/AccountDock-0.11.2-arm64-preview.zip" length="2291999" type="application/octet-stream" sparkle:edSignature="qsv2RjSIic31Z748mKCF+Rd5qACxiO8R671aLbEsjkb/VWQxbyJHn3wUZq6fc3v6EFuI4nT7zHwMkzlpw260DQ=="></enclosure>
+            <enclosure url="https://github.com/z8086486/account-dock/releases/download/v0.11.3/AccountDock-0.11.3-arm64-preview.zip" length="2290856" type="application/octet-stream" sparkle:edSignature="aqGljC98dnON1mH8TFFmiqfVIuy7IkvHD3qTr3xIG2b6cgsyNtsqORstOdlt73cYrek2/3JpGw38EIr+ESavBQ=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: g+SpOHvUxeV5gsvkF1AH7FkfR9ZAqVnm5q1FmKdhqDkTyeLPXHWTNMFmP/eEwJbO0Uy11uFCv82DtjlWWdQXAA==
+edSignature: 95Rg4xdrJd3gVXOV2P2yoHDBodPCQy1k4T4+61vfk5YPDQlRyc33MBFecOuKHCyUq2UA9PD9w8Hph7EqgNjgCw==
 length: 1150
 -->
