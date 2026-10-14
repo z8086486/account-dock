@@ -95,13 +95,13 @@ enum AppIdentityReader {
         guard let email = claims["email"] as? String else { return ("unavailable", nil, nil) }
         return ("stored_account", email, (claims["https://api.openai.com/auth"] as? [String: Any])?["chatgpt_plan_type"] as? String)
     }
-    static func arguments(_ pid: Int32) throws -> ([String], [String: String]) {
+    nonisolated static func arguments(_ pid: Int32) throws -> ([String], [String: String]) {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         var data = [UInt8](repeating: 0, count: 1_048_576), size = 1_048_576
         guard sysctl(&mib, 3, &data, &size, nil, 0) == 0 else { throw DockError.message("프로세스 정보 접근 불가") }
         return try parseArguments(Data(data.prefix(size)))
     }
-    static func parseArguments(_ data: Data) throws -> ([String], [String: String]) {
+    nonisolated static func parseArguments(_ data: Data) throws -> ([String], [String: String]) {
         guard data.count >= 5 else { throw DockError.message("프로세스 응답 오류") }
         let argc = data.withUnsafeBytes { Int($0.loadUnaligned(as: Int32.self)) }
         guard argc > 0 && argc < 4096 else { throw DockError.message("프로세스 응답 오류") }

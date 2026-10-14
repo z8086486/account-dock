@@ -113,3 +113,12 @@ __pycache__/
 !/scripts/generate_update_feed.py
 
 !/scripts/VaultHelper.swift
+
+# Menu bar activity monitor and login item settings.
+!/Sources/AccountDock/Activity.swift
+!/Sources/AccountDock/ActivityMenu.swift
+!/Sources/AccountDock/Startup.swift
+!/tests/AccountDockTests/ActivityTests.swift
+
+# Registered-account activity panel with fictional screenshot data.
+!/assets/activity.png

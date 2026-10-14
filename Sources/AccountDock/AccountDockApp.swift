@@ -3,15 +3,21 @@ import SwiftUI
 @main
 struct AccountDockApp: App {
     @StateObject private var updates = UpdateCenter()
+    @StateObject private var model = DockModel()
+    @StateObject private var activity = ActivityMonitor()
+    @StateObject private var menuBar = MenuBarController()
     init() {
         if let url = Bundle.module.url(forResource: "AccountDock", withExtension: "png"),
            let image = NSImage(contentsOf: url) { NSApplication.shared.applicationIconImage = image }
     }
     var body: some Scene {
-        WindowGroup("Account Dock") { Dashboard().environmentObject(updates) }
+        WindowGroup("Account Dock", id: "main") {
+            Dashboard(model: model).environmentObject(updates).onAppear { menuBar.install(model: model, monitor: activity) }
+        }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 1120, height: 850)
             .commands { CommandGroup(after: .appInfo) {
+                Button("Codex 활동 보기") { menuBar.togglePanel() }.keyboardShortcut("u", modifiers: [.command, .shift])
                 Button("Account Dock 업데이트 확인…") { updates.checkSelf() }.disabled(!updates.selfUpdateReady)
             } }
     }
@@ -249,14 +255,18 @@ final class DockModel: ObservableObject {
             await loadPresets()
         } catch { message = "현재 계정을 자동 등록하지 못했습니다. 설정 화면에서 Keychain 접근을 확인해 주세요." }
     }
-    func refreshUsage(allowWhileAdding: Bool = false) async {
+    private var lastUsageAttempt = Date.distantPast
+    func refreshUsage(allowWhileAdding: Bool = false, minimumInterval: TimeInterval = 0, skippingAccounts: Set<String> = []) async {
+        guard Date().timeIntervalSince(lastUsageAttempt) >= minimumInterval else { return }
         guard !refreshingUsage, (!busy || (allowWhileAdding && addingAccount)) else { return }
         guard UserDefaults.standard.object(forKey: "accountDock.usageEnabled") as? Bool ?? true else {
             usage = [:]
             return
         }
+        let snapshot = presets.filter { !skippingAccounts.contains($0.id) }
+        guard !snapshot.isEmpty else { return }
+        lastUsageAttempt = Date()
         refreshingUsage = true
-        let snapshot = presets
         usageLoading = Set(snapshot.map(\.id))
         defer { refreshingUsage = false; usageLoading.removeAll() }
         await UsageBatch.read(snapshot) { id, report in
@@ -278,11 +288,13 @@ final class DockModel: ObservableObject {
 }
 
 struct Dashboard: View {
-    @StateObject private var model = DockModel()
+    @ObservedObject var model: DockModel
     @EnvironmentObject private var updates: UpdateCenter
     @State private var selection = "accounts"
     @AppStorage("accountDock.setupCompleted.v1") private var setupCompleted = false
     @State private var showSetup = false
+    @State private var showBackgroundSetup = false
+    @AppStorage("accountDock.backgroundSetupCompleted.v1") private var backgroundSetupCompleted = false
     @State private var renamingPreset: AccountPreset?
     @State private var menuRefresh = 0
     @State private var closingAccount: AppIdentity?
@@ -324,7 +336,10 @@ struct Dashboard: View {
         .frame(minWidth: 1020, minHeight: 780)
         .onAppear { updates.canRestart = { !model.busy && !model.refreshingUsage } }
         .task {
-            if setupCompleted { await start() } else { showSetup = true }
+            if setupCompleted {
+                await start()
+                if !backgroundSetupCompleted { showBackgroundSetup = true }
+            } else { showSetup = true }
         }
         .task(id: menuRefresh) {
             guard menuRefresh > 0, setupCompleted else { return }
@@ -344,8 +359,16 @@ struct Dashboard: View {
         .sheet(isPresented: $showSetup) {
             SetupPanel(firstLaunch: true) {
                 setupCompleted = true; showSetup = false
-                Task { await start() }
+                Task {
+                    await start()
+                    if !backgroundSetupCompleted { showBackgroundSetup = true }
+                }
             }.frame(width: 660, height: 650).interactiveDismissDisabled()
+        }
+        .sheet(isPresented: $showBackgroundSetup) {
+            StartupPanel(introductory: true) {
+                backgroundSetupCompleted = true; showBackgroundSetup = false
+            }.padding(24).frame(width: 520).background(DockTheme.canvas).interactiveDismissDisabled()
         }
         .sheet(item: $renamingPreset) { preset in
             AccountNameSheet(preset: preset) { name in

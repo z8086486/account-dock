@@ -119,8 +119,9 @@ enum UsageReader {
 struct AccountUsageView: View {
     let report: UsageReport?
     let loading: Bool
+    var compact = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: compact ? 8 : 12) {
             if loading {
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("사용량 확인 중…") }
                     .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
@@ -147,7 +148,7 @@ struct AccountUsageView: View {
                                     .frame(width: geo.size.width * min(100, max(0, window.remainingPercent)) / 100)
                             }
                         }.frame(height: 6)
-                        if let reset = window.resetsAt {
+                        if !compact, let reset = window.resetsAt {
                             Text("초기화 · \(Date(timeIntervalSince1970: reset).formatted(date: .abbreviated, time: .shortened))")
                                 .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                         }
@@ -158,18 +159,18 @@ struct AccountUsageView: View {
                         Label("크레딧 · \(credit.bucket)", systemImage: "circle.hexagongrid")
                         Spacer()
                         Text(credit.label).fontWeight(.semibold)
-                    }.font(.system(size: 12)).padding(12)
+                    }.font(.system(size: 12)).padding(compact ? 8 : 12)
                         .background(DockTheme.blue.opacity(0.18), in: RoundedRectangle(cornerRadius: 9))
                 }
-                if let count = report.resetCredits {
+                if !compact, let count = report.resetCredits {
                     HStack { Text("한도 초기화 보상"); Spacer(); Text("\(count)회 남음") }
                         .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
-                if (report.credits ?? []).isEmpty && ["available", "partial"].contains(report.status) {
+                if !compact && (report.credits ?? []).isEmpty && ["available", "partial"].contains(report.status) {
                     Text("크레딧 잔액 · 확인할 수 없음")
                         .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
-                if let lifetime = report.activity["lifetimeTokens"] {
+                if !compact, let lifetime = report.activity["lifetimeTokens"] {
                     Text("누적 사용 토큰 · \(lifetime.formatted(.number.precision(.fractionLength(0))))")
                         .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
                 }
@@ -212,5 +213,28 @@ enum UsageBatch {
                 }
             }
         }
+    }
+}
+
+/// Reuses rate-limit information already written by Codex; makes no network request.
+@MainActor
+enum LocalUsageReport {
+    static func normalize(_ sample: LocalLimitSample) -> UsageReport? {
+        guard let raw = (try? JSONSerialization.jsonObject(with: sample.data)) as? [String: Any] else { return nil }
+        var group: [String: Any] = ["limitId": raw["limit_id"] ?? "codex", "limitName": raw["limit_name"] ?? "Codex"]
+        for role in ["primary", "secondary"] {
+            if let window = raw[role] as? [String: Any] {
+                group[role] = ["usedPercent": window["used_percent"] ?? NSNull(),
+                    "windowDurationMins": window["window_minutes"] ?? NSNull(), "resetsAt": window["resets_at"] ?? NSNull()]
+            }
+        }
+        if let credits = raw["credits"] as? [String: Any] {
+            group["credits"] = ["hasCredits": credits["has_credits"] ?? NSNull(),
+                "unlimited": credits["unlimited"] ?? NSNull(), "balance": credits["balance"] ?? NSNull()]
+        }
+        let result = UsageReader.normalize(limits: ["rateLimits": group], activity: nil)
+        guard result.status != "unavailable" else { return nil }
+        return UsageReport(status: result.status, windows: result.windows, activity: [:],
+            credits: result.credits, checkedAt: sample.date.timeIntervalSince1970)
     }
 }
