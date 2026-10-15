@@ -141,3 +141,7 @@ __pycache__/
 # Original rotary icon artwork and native animation.
 !/Sources/AccountDock/RotaryIcon.swift
 !/Sources/AccountDock/Resources/RotaryGeometry.json
+
+# Read-only per-turn runtime settings observation.
+!/Sources/AccountDock/ActivitySettings.swift
+!/tests/AccountDockTests/ActivitySettingsTests.swift

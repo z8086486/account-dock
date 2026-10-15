@@ -206,12 +206,15 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
     private var designSubscription: AnyCancellable?
     private var displayedDesign: WheelDesign?
     private var rotaryView: RotaryIconView?
-    private var runningCount = 0
+    private var runningLoad: Double = 0
     private var outsideMonitor: Any?
     private var localMonitor: Any?
     private var resignObserver: NSObjectProtocol?
     static func rotationDuration(conversations: Int) -> Double {
-        max(0.8, 1.6 / sqrt(Double(max(1, conversations))))
+        rotationDuration(load: Double(conversations))
+    }
+    static func rotationDuration(load: Double) -> Double {
+        max(0.6, 1.6 / sqrt(max(1, load.isFinite ? load : 1)))
     }
     private weak var model: DockModel?
     private weak var monitor: ActivityMonitor?
@@ -232,8 +235,8 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
         button.imagePosition = .imageOnly
         button.wantsLayer = true
         popover.behavior = .applicationDefined; popover.animates = false; popover.delegate = self
-        subscription = monitor.$snapshot.map { $0.active ? max(1, $0.activeAccounts.values.reduce(0, +)) : 0 }.removeDuplicates().sink { [weak self] count in
-            self?.setRunning(count)
+        subscription = monitor.$snapshot.map(\.animationLoad).removeDuplicates().sink { [weak self] load in
+            self?.setRunning(load)
         }
         monitor.start()
     }
@@ -265,19 +268,22 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
                 image.isTemplate = true; button.image = image
             }
         }
-        setRunning(runningCount)
+        setRunning(runningLoad)
     }
-    private func setRunning(_ count: Int) {
-        runningCount = count
-        if let rotaryView { rotaryView.configure(count: count) }
-        else if let layer = item?.button?.layer { Self.animateWheel(layer: layer, count: count) }
-        item?.button?.toolTip = count > 0 ? "Account Dock · Codex 작업 중" : "Account Dock · 대기 중"
+    private func setRunning(_ load: Double) {
+        runningLoad = load
+        if let rotaryView { rotaryView.configure(load: load) }
+        else if let layer = item?.button?.layer { Self.animateWheel(layer: layer, load: load) }
+        item?.button?.toolTip = load > 0 ? "Account Dock · Codex 작업 중" : "Account Dock · 대기 중"
     }
     static func animateWheel(layer: CALayer, count: Int) {
+        animateWheel(layer: layer, load: Double(count))
+    }
+    static func animateWheel(layer: CALayer, load: Double) {
         // Commit the visible angle before removing/replacing the animation.
         // The model layer then keeps that angle while idle and across restarts.
         Self.holdRotation(on: layer)
-        if count > 0 {
+        if load > 0 {
             let spin = CAKeyframeAnimation(keyPath: "transform")
             let phase = atan2(layer.transform.m12, layer.transform.m11)
             // Native status-button layer coordinates are unflipped: negative angles turn clockwise.
@@ -287,7 +293,7 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
             spin.values = (0...64).map { step in
                 NSValue(caTransform3D: Self.centeredRotation(angle: phase - CGFloat(step) * .pi * 2 / 64, pivot: pivot))
             }
-            spin.duration = Self.rotationDuration(conversations: count); spin.repeatCount = .infinity
+            spin.duration = Self.rotationDuration(load: load); spin.repeatCount = .infinity
             spin.calculationMode = .linear
             spin.timingFunction = CAMediaTimingFunction(name: .linear)
             layer.add(spin, forKey: "codexWorking")
@@ -424,7 +430,7 @@ struct ActivityMenu: View {
             HStack(spacing: 10) {
                 Button(action: openMainWindow) {
                     PanelWheel(design: WheelDesign(rawValue: wheelSelection) ?? .classic,
-                        count: !reduceMotion && monitor.snapshot.active ? max(1, monitor.snapshot.activeAccounts.values.reduce(0, +)) : 0)
+                        load: reduceMotion ? 0 : monitor.snapshot.animationLoad)
                         .frame(width: 36, height: 36)
                         .padding(3).contentShape(Circle())
                 }.buttonStyle(.plain).help("Account Dock 열기").accessibilityLabel("Account Dock 열기")
@@ -488,6 +494,9 @@ struct ActivityMenu: View {
                                         .foregroundStyle(count > 0 ? Color.primary : Color(nsColor: .secondaryLabelColor))
                                         .fontWeight(count > 0 ? .medium : .regular)
                                 }
+                                ForEach(visibleSnapshot.activeConversations.filter { $0.account == id }.sorted { $0.id < $1.id }) { conversation in
+                                    ActivityConversationRow(conversation: conversation)
+                                }
                             }
                             if let id = accountID(preset) {
                                 if visibleSnapshot.days.values.contains(where: { $0[id] != nil }) {
@@ -548,6 +557,29 @@ struct ActivityMenu: View {
             Text(value.formatted()).font(.system(size: 17, weight: .semibold, design: .rounded)).monospacedDigit().minimumScaleFactor(0.6).lineLimit(1)
         }.frame(maxWidth: .infinity, alignment: .leading).padding(9)
             .background(DockTheme.blue.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+struct ActivityConversationRow: View {
+    let conversation: ActiveConversation
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: "bubble.left").foregroundStyle(.secondary)
+                Text(conversation.project ?? "대화").lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 2)
+                Text(conversation.shortID).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+            }.font(.system(size: 11, weight: .medium))
+            HStack(spacing: 5) {
+                Label(conversation.effortLabel, systemImage: "brain")
+                    .help("추론 수준 · \(conversation.effortLabel)")
+                Label(conversation.speedLabel, systemImage: "bolt")
+                    .help("빠른 응답 · 실제 요청 기록 기준. 배율은 모델별로 다릅니다.")
+            }.font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 7).padding(.vertical, 5)
+                .background(DockTheme.blue.opacity(0.16), in: RoundedRectangle(cornerRadius: 7))
+        }.frame(maxWidth: .infinity, alignment: .leading)
+            .help(conversation.model ?? "모델 정보 확인 안 됨")
     }
 }
 
@@ -637,12 +669,12 @@ struct ActivityPanelReader: NSViewRepresentable {
 /// A stable image layer, separate from the view layer managed by AppKit layout.
 private struct PanelWheel: NSViewRepresentable {
     let design: WheelDesign
-    let count: Int
+    let load: Double
     func makeNSView(context: Context) -> PanelWheelView {
         PanelWheelView(frame: NSRect(x: 0, y: 0, width: 36, height: 36))
     }
     func updateNSView(_ view: PanelWheelView, context: Context) {
-        view.configure(design: design, count: count)
+        view.configure(design: design, load: load)
     }
     static func dismantleNSView(_ view: PanelWheelView, coordinator: ()) {
         view.stopAnimation()
@@ -654,7 +686,7 @@ final class PanelWheelView: NSView {
     let wheelLayer = CALayer()
     private var rotaryView: RotaryIconView?
     private var design: WheelDesign?
-    private var count: Int?
+    private var load: Double?
     override var allowsVibrancy: Bool { false }
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -675,6 +707,9 @@ final class PanelWheelView: NSView {
         CATransaction.commit()
     }
     func configure(design: WheelDesign, count: Int) {
+        configure(design: design, load: Double(count))
+    }
+    func configure(design: WheelDesign, load: Double) {
         let changed = self.design != design
         if changed {
             stopAnimation(); rotaryView?.removeFromSuperview(); rotaryView = nil
@@ -685,9 +720,9 @@ final class PanelWheelView: NSView {
                 view.autoresizingMask = [.width, .height]; addSubview(view); rotaryView = view
             } else { renderImage() }
         }
-        if let rotaryView { rotaryView.configure(count: count) }
-        else if changed || self.count != count { MenuBarController.animateWheel(layer: wheelLayer, count: count) }
-        self.count = count
+        if let rotaryView { rotaryView.configure(load: load) }
+        else if changed || self.load != load { MenuBarController.animateWheel(layer: wheelLayer, load: load) }
+        self.load = load
     }
     func stopAnimation() {
         MenuBarController.holdRotation(on: wheelLayer); rotaryView?.pause()

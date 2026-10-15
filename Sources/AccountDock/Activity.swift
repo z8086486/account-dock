@@ -7,11 +7,82 @@ struct LocalLimitSample: Sendable, Codable {
     let date: Date
 }
 
+/// Execution metadata only. Conversation text and tool output are never retained.
+struct ActiveConversation: Sendable, Identifiable, Equatable {
+    let id: String
+    let account: String
+    var model: String?
+    var effort: String?
+    var serviceTier: String?
+    var project: String?
+    var effortLabel: String {
+        switch effort?.lowercased() {
+        case "none": "None"
+        case "minimal": "Minimal"
+        case "low": "Low"
+        case "medium": "Medium"
+        case "high": "High"
+        case "xhigh", "extra_high", "extra high": "Extra High"
+        case "max": "Max"
+        case "ultra": "Ultra"
+        default: "확인 안 됨"
+        }
+    }
+    var speedLabel: String {
+        switch serviceTier?.lowercased() {
+        case "fast", "priority": "빠름"
+        case "ultrafast": "매우 빠름"
+        case "standard", "default": "일반"
+        default: "확인 안 됨"
+        }
+    }
+    /// Decorative weighting, not a throughput, billing, or token estimate.
+    var animationWeight: Double {
+        let reasoning: Double
+        switch effort?.lowercased() {
+        case "high": reasoning = 1.15
+        case "xhigh", "extra_high", "extra high": reasoning = 1.3
+        case "max": reasoning = 1.45
+        case "ultra": reasoning = 1.6
+        default: reasoning = 1
+        }
+        let speed: Double
+        switch serviceTier?.lowercased() {
+        case "fast", "priority": speed = 1.25
+        case "ultrafast": speed = 1.5
+        default: speed = 1
+        }
+        return reasoning * speed
+    }
+    var shortID: String { String(id.suffix(8)) }
+}
+
+struct ActivityTurnContext: Sendable, Codable, Equatable {
+    var turnID: String?
+    var model: String?
+    var effort: String?
+    var serviceTier: String?
+    var project: String?
+    init(_ payload: [String: Any]) {
+        let settings = (payload["collaboration_mode"] as? [String: Any])?["settings"] as? [String: Any]
+        turnID = (payload["turn_id"] as? String).map { String($0.prefix(100)) }
+        model = (payload["model"] as? String).map { String($0.prefix(100)) }
+        effort = (payload["effort"] as? String) ?? (payload["reasoning_effort"] as? String) ?? (settings?["reasoning_effort"] as? String)
+        serviceTier = (payload["service_tier"] as? String) ?? (payload["serviceTier"] as? String)
+        effort = effort?.lowercased()
+        if !["none", "minimal", "low", "medium", "high", "xhigh", "extra_high", "extra high", "max", "ultra"].contains(effort ?? "") { effort = nil }
+        serviceTier = serviceTier?.lowercased()
+        if !["fast", "priority", "ultrafast", "standard", "default"].contains(serviceTier ?? "") { serviceTier = nil }
+        project = (payload["cwd"] as? String).map { String(URL(fileURLWithPath: $0).lastPathComponent.prefix(100)) }
+    }
+}
+
 struct ActivitySnapshot: Sendable {
     var costs: [String: [String: TokenCost]] = [:]
     var limits: [String: LocalLimitSample] = [:]
     var days: [String: [String: Int64]] = [:]
     var activeAccounts: [String: Int] = [:]
+    var activeConversations: [ActiveConversation] = []
     var observedAccounts: Set<String> = []
     var active = false
     var indexing = true
@@ -23,10 +94,16 @@ struct ActivitySnapshot: Sendable {
         result.days = days.mapValues { $0.filter { accounts.contains($0.key) } }
         result.limits = limits.filter { accounts.contains($0.key) }
         result.activeAccounts = activeAccounts.filter { accounts.contains($0.key) }
+        result.activeConversations = activeConversations.filter { accounts.contains($0.account) }
         result.observedAccounts = observedAccounts.intersection(accounts)
         return result
     }
     static let unknown = "__unknown__"
+    var animationLoad: Double {
+        guard active else { return 0 }
+        let count = max(1, activeAccounts.values.reduce(0, +))
+        return Double(count) + activeConversations.reduce(0) { $0 + max(0, $1.animationWeight - 1) }
+    }
     func tokens(account: String? = nil, day: String? = nil) -> Int64 {
         days.filter { day == nil || $0.key == day }.values.reduce(0) { result, accounts in
             result + (account.map { accounts[$0, default: 0] } ?? accounts.values.reduce(0, +))
@@ -64,6 +141,8 @@ struct ActivityLogState: Sendable, Codable {
     var model: String?
     var costs: [String: [String: TokenCost]]?
     var replayUntil: UInt64?
+    var turnContext: ActivityTurnContext?
+    var activeTurnID: String?
 
     mutating func observeOwner(_ owner: String?, at offset: UInt64) {
         if owner != attributedAccount {
@@ -80,6 +159,7 @@ struct ActivityLogState: Sendable, Codable {
         }
         if object["type"] as? String == "turn_context" {
             model = payload["model"] as? String
+            turnContext = ActivityTurnContext(payload)
             return
         }
         guard object["type"] as? String == "event_msg", let type = payload["type"] as? String else { return }
@@ -91,9 +171,11 @@ struct ActivityLogState: Sendable, Codable {
             limit = LocalLimitSample(data: data, date: date)
         }
         let turn = payload["turn_id"] as? String ?? "legacy"
-        if type == "task_started" { turns.insert(turn) }
+        if type == "task_started" { turns.insert(turn); activeTurnID = turn }
         if ["task_complete", "turn_aborted", "task_failed"].contains(type) {
             turns.remove(turn); if let date { lastFinish = max(lastFinish, date) }
+            if activeTurnID == turn { activeTurnID = nil }
+            if turnContext?.turnID == turn { turnContext = nil }
         }
         if type == "token_count", payload["info"] is [String: Any], let date { lastWork = max(lastWork, date) }
         guard !liveOnly else { return }
@@ -159,6 +241,12 @@ struct ActivityLogState: Sendable, Codable {
 actor ActivityScanner {
     private var files: [URL: ActivityLogState] = [:]
     private var live: [URL: ActivityLogState] = [:]
+    private struct SettingsSample {
+        let turn: String?
+        let checkedAt: Date
+        let value: ObservedActivitySettings?
+    }
+    private var requestSettings: [URL: SettingsSample] = [:]
     private var discovered: [URL] = []
     private var watchedFolders: Set<URL> = []
     private let cacheURL: URL?
@@ -188,7 +276,7 @@ actor ActivityScanner {
         }
     }
     func scan(root newRoot: URL, now: Date = Date()) -> ActivitySnapshot {
-        if newRoot != root { root = newRoot; lastScan = .distantPast; files = [:]; live = [:] }
+        if newRoot != root { root = newRoot; lastScan = .distantPast; files = [:]; live = [:]; requestSettings = [:] }
         let fm = FileManager.default
         if now.timeIntervalSince(lastScan) >= 30 {
             var homes = [root, managed.appendingPathComponent("codex")]
@@ -211,6 +299,7 @@ actor ActivityScanner {
             if files.keys.contains(where: { !paths.contains($0) }) { cacheDirty = true }
             files = files.filter { paths.contains($0.key) }
             live = live.filter { paths.contains($0.key) }
+            requestSettings = requestSettings.filter { paths.contains($0.key) }
             lastScan = now
         }
         let owners = ActivityOwnership.read().filter { url, _ in
@@ -227,7 +316,9 @@ actor ActivityScanner {
         }.sorted { $0.2 > $1.2 }
         for (url, size, modified, number) in entries {
             var state = files[url] ?? ActivityLogState()
-            if size < state.offset || (state.fileNumber != 0 && number != state.fileNumber) { state = ActivityLogState() }
+            if size < state.offset || (state.fileNumber != 0 && number != state.fileNumber) {
+                state = ActivityLogState(); requestSettings[url] = nil
+            }
             state.fileNumber = number
             let oldOwner = state.attributedAccount
             state.observeOwner(owners[url], at: size)
@@ -273,7 +364,29 @@ actor ActivityScanner {
                 if active && recent.offset == size {
                     snapshot.active = true
                     snapshot.activeAccounts[recent.account, default: 0] += 1
-                }
+                    // A historical context must not be mistaken for a different live turn.
+                    let turn = recent.activeTurnID ?? (state.offset == size ? state.activeTurnID : nil)
+                    let context = recent.turnContext ?? (turn != nil && state.turnContext?.turnID == turn ? state.turnContext : nil)
+                    let threadID = String(url.deletingPathExtension().lastPathComponent.suffix(36))
+                    var sample = requestSettings[url]
+                    if sample?.turn != turn || sample == nil ||
+                        ((turn == nil || sample?.value?.serviceTier == nil) && now.timeIntervalSince(sample!.checkedAt) >= 5) {
+                        let value: ObservedActivitySettings?
+                        if let turn { value = ActivitySettingsReader.settings(home: root, threadID: threadID, turnID: turn) }
+                        else { value = ActivitySettingsReader.latestSettings(home: root, threadID: threadID,
+                            since: max(now.addingTimeInterval(-180), recent.lastFinish)) }
+                        sample = SettingsSample(turn: turn, checkedAt: now, value: value)
+                        requestSettings[url] = sample
+                    }
+                    let confirmedTurn = turn ?? sample?.value?.turnID
+                    let current = confirmedTurn != nil && context?.turnID == confirmedTurn
+                    snapshot.activeConversations.append(ActiveConversation(
+                        id: url.deletingPathExtension().lastPathComponent, account: recent.account,
+                        model: sample?.value?.model ?? (current ? context?.model : nil),
+                        effort: sample?.value?.effort ?? (current ? context?.effort : nil),
+                        serviceTier: sample?.value?.serviceTier ?? (current ? context?.serviceTier : nil),
+                        project: current ? context?.project : nil))
+                } else { requestSettings[url] = nil }
                 if let limit = recent.limit, limit.date > (snapshot.limits[recent.account]?.date ?? .distantPast) {
                     snapshot.limits[recent.account] = limit
                 }

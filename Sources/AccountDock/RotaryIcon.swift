@@ -104,6 +104,7 @@ final class RotaryIconView: NSView {
     private var startedAt: CFTimeInterval = CACurrentMediaTime()
     private var velocity: Double = 0
     private(set) var count: Int = 0
+    private(set) var load: Double = 0
     override var allowsVibrancy: Bool { false }
     static func frames(template: Bool) -> [CGImage] {
         if let cached = cachedFrames[template] { return cached }
@@ -129,12 +130,15 @@ final class RotaryIconView: NSView {
     override func layout() { super.layout(); layoutParts() }
     func currentPhase(at now: CFTimeInterval = CACurrentMediaTime()) -> Double { phase + (now-startedAt)*velocity }
     func configure(count: Int, reduceMotion: Bool? = nil) {
-        let desired = (reduceMotion ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) ? 0 : max(0, count)
-        guard desired != self.count else { return }
+        configure(load: Double(count), reduceMotion: reduceMotion)
+    }
+    func configure(load: Double, reduceMotion: Bool? = nil) {
+        let desired = (reduceMotion ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) ? 0 : max(0, load.isFinite ? load : 0)
+        guard desired != self.load else { return }
         let now = CACurrentMediaTime()
         phase = currentPhase(at: now).truncatingRemainder(dividingBy: 6 * .pi)
-        startedAt = now; self.count = desired
-        velocity = desired > 0 ? 2 * .pi / MenuBarController.rotationDuration(conversations: desired) : 0
+        startedAt = now; self.load = desired; self.count = Int(min(desired, Double(Int.max / 2)))
+        velocity = desired > 0 ? 2 * .pi / MenuBarController.rotationDuration(load: desired) : 0
         layoutParts()
     }
     func pause() { configure(count: 0) }
@@ -150,10 +154,10 @@ final class RotaryIconView: NSView {
         frameLayer.position = CGPoint(x: bounds.midX, y: bounds.midY)
         frameLayer.removeAnimation(forKey: "rotaryFrames")
         frameLayer.contents = frames[index]
-        if count > 0 {
+        if load > 0 {
             let animation = CAKeyframeAnimation(keyPath: "contents")
             animation.values = (0...Self.frameCount).map { frames[(index+$0)%Self.frameCount] }
-            animation.duration = 3 * MenuBarController.rotationDuration(conversations: count)
+            animation.duration = 3 * MenuBarController.rotationDuration(load: load)
             animation.repeatCount = .infinity; animation.calculationMode = .discrete
             frameLayer.add(animation, forKey: "rotaryFrames")
         }
