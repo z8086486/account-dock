@@ -78,7 +78,7 @@ VS Code는 `/Applications`에 설치되어 있어야 합니다. Python·Xcode는
 <details>
 <summary>소스 빌드</summary>
 
-Swift 6 이상과 Xcode 또는 Command Line Tools가 필요합니다.
+macOS 26 SDK를 포함한 Xcode 26 이상 또는 해당 Command Line Tools가 필요합니다. 빌드한 앱은 macOS 14 이상에서 실행됩니다.
 
 ```sh
 git clone https://github.com/z8086486/account-dock.git
