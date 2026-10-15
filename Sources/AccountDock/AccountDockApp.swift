@@ -14,7 +14,10 @@ struct AccountDockApp: App {
     var body: some Scene {
         Window("Account Dock", id: "main") {
             MainWindowContent(delegate: appDelegate) {
-                Dashboard(model: model).environmentObject(updates).onAppear { menuBar.install(model: model, monitor: activity) }
+                Dashboard(model: model).environmentObject(updates).onAppear { menuBar.install(model: model, monitor: activity) {
+                    appDelegate.openMainWindow?()
+                    NSApp.activate(ignoringOtherApps: true)
+                } }
             }
         }
             .windowStyle(.hiddenTitleBar)

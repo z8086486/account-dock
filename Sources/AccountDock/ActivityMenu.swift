@@ -194,6 +194,7 @@ final class ActivityMonitor: ObservableObject {
 /// Animate only the live menu-bar button. Inactive-display replicas remain static.
 @MainActor
 final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
+    private var openMainWindow: (() -> Void)?
     private var item: NSStatusItem?
     private let popover = NSPopover()
     private var positioningPanel: NSPanel?
@@ -208,9 +209,10 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
     }
     private weak var model: DockModel?
     private weak var monitor: ActivityMonitor?
-    func install(model: DockModel, monitor: ActivityMonitor) {
+    func install(model: DockModel, monitor: ActivityMonitor, openMainWindow: @escaping () -> Void) {
         guard item == nil else { return }
         self.model = model; self.monitor = monitor
+        self.openMainWindow = openMainWindow
         let status = NSStatusBar.system.statusItem(withLength: 28)
         item = status
         guard let button = status.button else { return }
@@ -239,6 +241,10 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
     }
     private func setRunning(_ count: Int) {
         guard let layer = item?.button?.layer else { return }
+        Self.animateWheel(layer: layer, count: count)
+        item?.button?.toolTip = count > 0 ? "Account Dock · Codex 작업 중" : "Account Dock · 대기 중"
+    }
+    static func animateWheel(layer: CALayer, count: Int) {
         // Commit the visible angle before removing/replacing the animation.
         // The model layer then keeps that angle while idle and across restarts.
         Self.holdRotation(on: layer)
@@ -257,7 +263,6 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
             spin.timingFunction = CAMediaTimingFunction(name: .linear)
             layer.add(spin, forKey: "codexWorking")
         } else { layer.removeAnimation(forKey: "codexWorking") }
-        item?.button?.toolTip = count > 0 ? "Account Dock · Codex 작업 중" : "Account Dock · 대기 중"
     }
     static func holdRotation(on layer: CALayer) {
         let visible = layer.presentation()?.transform ?? layer.transform
@@ -306,7 +311,10 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
         positioningPanel = anchor
         anchor.orderFrontRegardless()
         guard let positioningView = anchor.contentView else { return }
-        popover.contentViewController = NSHostingController(rootView: ActivityMenu(model: model, monitor: monitor))
+        popover.contentViewController = NSHostingController(rootView: ActivityMenu(openMainWindow: { [weak self] in
+            self?.popover.performClose(nil)
+            self?.openMainWindow?()
+        }, model: model, monitor: monitor))
         popover.contentSize = NSSize(width: 370, height: 650)
         popover.show(relativeTo: positioningView.bounds, of: positioningView, preferredEdge: .minY)
         // Keep the current app/display active. Activating Account Dock here can bring its
@@ -345,6 +353,9 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
 }
 
 struct ActivityMenu: View {
+    var openMainWindow: () -> Void = {}
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(WheelDesign.preferenceKey) private var wheelSelection = WheelDesign.classic.rawValue
     @ObservedObject var model: DockModel
     @ObservedObject var monitor: ActivityMonitor
     @State private var selected = "all"
@@ -382,7 +393,12 @@ struct ActivityMenu: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                WheelPreview(size: 21)
+                Button(action: openMainWindow) {
+                    PanelWheel(design: WheelDesign(rawValue: wheelSelection) ?? .classic,
+                        count: !reduceMotion && monitor.snapshot.active ? max(1, monitor.snapshot.activeAccounts.values.reduce(0, +)) : 0)
+                        .frame(width: 36, height: 36)
+                        .padding(3).contentShape(Circle())
+                }.buttonStyle(.plain).help("Account Dock 열기").accessibilityLabel("Account Dock 열기")
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Codex 활동").font(.system(size: 15, weight: .semibold))
                     Text(monitor.snapshot.active ? "작업 중" : "대기 중").font(.system(size: 12)).foregroundStyle(Color(nsColor: .secondaryLabelColor))
@@ -440,7 +456,8 @@ struct ActivityMenu: View {
                                 HStack(spacing: 6) {
                                     Circle().fill(count > 0 ? DockTheme.orange : Color(nsColor: .secondaryLabelColor).opacity(0.4)).frame(width: 6, height: 6)
                                     Text(count > 0 ? "작업 중 · 대화 \(count)개" : (monitor.snapshot.observedAccounts.contains(id) ? "대기 중" : "활동 기록 없음"))
-                                        .foregroundStyle(count > 0 ? DockTheme.orange : Color(nsColor: .secondaryLabelColor))
+                                        .foregroundStyle(count > 0 ? Color.primary : Color(nsColor: .secondaryLabelColor))
+                                        .fontWeight(count > 0 ? .medium : .regular)
                                 }
                             }
                             if let id = accountID(preset) {
@@ -585,6 +602,37 @@ struct ActivityPanelReader: NSViewRepresentable {
         init(panel: ActivityPanelWindow) { self.panel = panel; super.init(frame: .zero) }
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
         override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); panel.window = window }
+    }
+}
+
+/// A cached wheel image animated by Core Animation only while this panel exists.
+private struct PanelWheel: NSViewRepresentable {
+    let design: WheelDesign
+    let count: Int
+    func makeNSView(context: Context) -> WheelView {
+        let view = WheelView(frame: NSRect(x: 0, y: 0, width: 36, height: 36))
+        view.wantsLayer = true
+        view.imageScaling = .scaleProportionallyUpOrDown
+        return view
+    }
+    func updateNSView(_ view: WheelView, context: Context) {
+        if view.design != design {
+            view.image = WheelIcon.image(size: 36, design: design)
+            view.design = design
+        }
+        if view.count != count, let layer = view.layer {
+            MenuBarController.animateWheel(layer: layer, count: count)
+            view.count = count
+        }
+    }
+    static func dismantleNSView(_ view: WheelView, coordinator: ()) {
+        if let layer = view.layer { MenuBarController.holdRotation(on: layer) }
+    }
+    final class WheelView: NSImageView {
+        var design: WheelDesign?
+        var count: Int?
+        // The enclosing SwiftUI button owns clicks and keyboard accessibility.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }
 
