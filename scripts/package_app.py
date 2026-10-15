@@ -71,11 +71,9 @@ def main():
         shutil.copy2(MANIFEST.parent / asset, contents / 'Resources' / asset)
     for bundle in binary_dir.glob('AccountDock_AccountDock.bundle'):
         shutil.copytree(bundle, contents / 'Resources' / bundle.name, symlinks=True)
-    license_path = ROOT / '.build/checkouts/Sparkle/LICENSE'
-    if not license_path.exists():
-        license_path = ROOT / '.build/checkouts/sparkle/LICENSE'
-    if license_path.exists():
-        shutil.copy2(license_path, contents / 'Resources/Sparkle-LICENSE.txt')
+    for document in ['LICENSE', 'THIRD_PARTY_NOTICES.md']:
+        shutil.copy2(ROOT / document, contents / 'Resources' / document)
+    shutil.copytree(ROOT / 'licenses', contents / 'Resources/licenses')
     info = {'CFBundleIdentifier': 'app.accountdock.mac', 'CFBundleName': 'Account Dock',
             'CFBundleDisplayName': 'Account Dock', 'CFBundleExecutable': 'AccountDock',
             'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': release['version'],

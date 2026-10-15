@@ -130,3 +130,10 @@ __pycache__/
 
 # Reviewed wheel animation for the public README.
 !/assets/wheel-animation.gif
+
+# Public project and third-party licenses.
+!/LICENSE
+!/THIRD_PARTY_NOTICES.md
+!/licenses/
+/licenses/*
+!/licenses/Sparkle-LICENSE.txt

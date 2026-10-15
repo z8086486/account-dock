@@ -46,7 +46,7 @@ VS Code는 `/Applications`에 설치되어 있어야 합니다. Python·Xcode는
 
 **메뉴 막대**의 휠은 Codex 작업을 감지하면 회전합니다. 클릭하면 오늘·누적 토큰과 계정별 남은 한도를 볼 수 있습니다. **활동 기록 · API 환산**을 펼치면 잔디밭과 비용 추정액이 표시됩니다. 새로고침 버튼으로 바로 조회할 수 있으며, 패널의 휠을 누르면 메인 창이 열립니다.
 
-<p align="center"><img src="assets/wheel-animation.gif" width="280" alt="Codex 작업 중 회전하는 휠" /></p>
+<p align="center"><img src="assets/wheel-animation.gif" width="280" alt="대화 1·2·4·8개에 따라 빨라지는 5스포크 휠" /></p>
 
 <p align="center"><img src="assets/activity.png" width="370" alt="Codex 활동 패널" /></p>
 
@@ -85,3 +85,7 @@ swift test
 패키징 방법은 [배포 가이드](RELEASING.md)를 참고하세요.
 
 </details>
+
+## 라이선스
+
+[MIT License](LICENSE) · [외부 구성요소 고지](THIRD_PARTY_NOTICES.md)
