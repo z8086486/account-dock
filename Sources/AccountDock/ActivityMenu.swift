@@ -4,10 +4,11 @@ import Combine
 import QuartzCore
 
 enum WheelDesign: String, CaseIterable, Identifiable {
-    case classic, meisterS1
+    case classic
+    case fiveSpoke = "meisterS1" // Preserve the existing saved preference.
     static let preferenceKey = "accountDock.wheelDesign"
     var id: String { rawValue }
-    var title: String { self == .classic ? "기본 · 8스포크" : "MEISTER S1 · 5스포크" }
+    var title: String { self == .classic ? "기본 · 8스포크" : "5스포크 · 볼트 림" }
     static var current: WheelDesign {
         WheelDesign(rawValue: UserDefaults.standard.string(forKey: preferenceKey) ?? "") ?? .classic
     }
@@ -18,7 +19,7 @@ enum WheelDesign: String, CaseIterable, Identifiable {
 @MainActor
 enum WheelIcon {
     static func image(angle: CGFloat = 0, size: CGFloat = 20, color: NSColor = .black, design: WheelDesign = .current) -> NSImage {
-        if design == .meisterS1 { return meister(size: size, angle: angle, color: color, template: false) }
+        if design == .fiveSpoke { return fiveSpoke(size: size, angle: angle, color: color, template: false) }
         let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             color.setFill()
             let metal = NSGradient(colors: [NSColor(white: 0.16, alpha: 1), NSColor(white: 0.48, alpha: 1), NSColor(white: 0.11, alpha: 1)])!
@@ -86,7 +87,7 @@ enum WheelIcon {
     }
     /// A single silhouette uses the menu bar's appearance, while the asymmetric valve marks rim rotation.
     static func menuImage(size: CGFloat, color: NSColor, design: WheelDesign = .current) -> NSImage {
-        if design == .meisterS1 { return meister(size: size, color: color, template: true) }
+        if design == .fiveSpoke { return fiveSpoke(size: size, color: color, template: true) }
         return NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             let context = NSGraphicsContext.current!.cgContext
             context.translateBy(x: rect.midX, y: rect.midY)
@@ -113,7 +114,7 @@ enum WheelIcon {
     }
 
     /// Front elevation: five broad, flared spokes, recessed hub and bolted stepped lip.
-    private static func meister(size: CGFloat, angle: CGFloat = 0, color: NSColor, template: Bool) -> NSImage {
+    private static func fiveSpoke(size: CGFloat, angle: CGFloat = 0, color: NSColor, template: Bool) -> NSImage {
         NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             let c = NSGraphicsContext.current!.cgContext
             c.translateBy(x: rect.midX, y: rect.midY)

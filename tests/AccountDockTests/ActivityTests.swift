@@ -5,7 +5,7 @@ import AppKit
 final class ActivityTests: XCTestCase {
     @MainActor func testPanelWheelRotatesInPlaceAcrossLayoutChanges() throws {
         let view = PanelWheelView(frame: NSRect(x: 0, y: 0, width: 36, height: 36))
-        view.configure(design: .meisterS1, count: 2)
+        view.configure(design: .fiveSpoke, count: 2)
         XCTAssertTrue(view.wheelLayer !== view.layer)
         let spin = try XCTUnwrap(view.wheelLayer.animation(forKey: "codexWorking") as? CAKeyframeAnimation)
         for value in try XCTUnwrap(spin.values as? [NSValue]) {
@@ -16,7 +16,7 @@ final class ActivityTests: XCTestCase {
         view.layout()
         XCTAssertEqual(view.wheelLayer.position, CGPoint(x: 21, y: 20))
         XCTAssertEqual(view.wheelLayer.bounds.size, CGSize(width: 40, height: 40))
-        view.configure(design: .meisterS1, count: 0)
+        view.configure(design: .fiveSpoke, count: 0)
         XCTAssertNil(view.wheelLayer.animation(forKey: "codexWorking"))
     }
     @MainActor func testPausedWheelKeepsItsModelAngleWhenNoPresentationLayerExists() {
