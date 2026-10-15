@@ -5,9 +5,14 @@ permissions:
   contents: read
 jobs:
   preview:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      - name: Verify macOS SDK for Liquid Glass
+        run: |
+          xcodebuild -version
+          SDK_VERSION=$(xcrun --sdk macosx --show-sdk-version)
+          test "${SDK_VERSION%%.*}" -ge 26
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
