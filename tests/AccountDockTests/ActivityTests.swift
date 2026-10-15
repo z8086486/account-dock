@@ -4,26 +4,24 @@ import AppKit
 
 final class ActivityTests: XCTestCase {
     @MainActor func testRotaryKeepsHousingFixedAndPreservesPhase() throws {
-        let view = RotaryIconView(frame: NSRect(x: 0, y: 0, width: 36, height: 36), template: false)
-        view.configure(count: 1)
-        let orbit = try XCTUnwrap(view.orbitLayer.animation(forKey: "rotaryOrbit") as? CAKeyframeAnimation)
-        let spin = try XCTUnwrap(view.rotorLayer.animation(forKey: "rotarySpin") as? CABasicAnimation)
-        XCTAssertEqual(spin.duration, orbit.duration * 3, accuracy: 0.000001)
-        XCTAssertNil(view.housingLayer.animationKeys())
-        XCTAssertNil(view.shaftLayer.animationKeys())
-        let positions = try XCTUnwrap(orbit.values as? [NSValue])
-        for position in positions {
-            let p = position.pointValue
-            XCTAssertEqual(hypot(p.x - 18, p.y - 18), 36 * 12 / 264, accuracy: 0.00001)
-        }
+        let view = RotaryIconView(frame: NSRect(x: 0, y: 0, width: 14, height: 22), template: true)
+        view.configure(count: 1, reduceMotion: false)
+        let animation = try XCTUnwrap(view.frameLayer.animation(forKey: "rotaryFrames") as? CAKeyframeAnimation)
+        XCTAssertEqual(animation.duration, MenuBarController.rotationDuration(conversations: 1) * 3, accuracy: 0.000001)
+        XCTAssertEqual(animation.values?.count, RotaryIconView.frameCount + 1)
+        XCTAssertTrue(CATransform3DIsIdentity(view.frameLayer.transform))
+        XCTAssertEqual(view.frameLayer.bounds.width, 20)
+        XCTAssertEqual(view.frameLayer.position, CGPoint(x: 7, y: 11))
         view.pause()
         let paused = view.currentPhase()
         XCTAssertEqual(paused, view.currentPhase(at: CACurrentMediaTime() + 100), accuracy: 0.00001)
-        XCTAssertNil(view.orbitLayer.animationKeys())
-        view.configure(count: 4)
+        XCTAssertNil(view.frameLayer.animationKeys())
+        view.configure(count: 4, reduceMotion: false)
         XCTAssertEqual(view.phase, paused, accuracy: 0.00001)
-        XCTAssertEqual(try XCTUnwrap(view.rotorLayer.animation(forKey: "rotarySpin")).duration, 2.4, accuracy: 0.00001)
-        view.pause()
+        XCTAssertEqual(try XCTUnwrap(view.frameLayer.animation(forKey: "rotaryFrames")).duration, 2.4, accuracy: 0.00001)
+        view.configure(count: 4, reduceMotion: true)
+        XCTAssertNil(view.frameLayer.animationKeys())
+        XCTAssertEqual(view.count, 0)
     }
     @MainActor func testRotarySelectionSwitchesWithoutSpinningHousingOrLeavingLayers() {
         let view = PanelWheelView(frame: NSRect(x: 0, y: 0, width: 36, height: 36))
@@ -47,6 +45,11 @@ final class ActivityTests: XCTestCase {
             XCTAssertNotNil(image.cgImage(forProposedRect: &rect, context: nil, hints: nil))
         }
         if let directory = ProcessInfo.processInfo.environment["ROTARY_PREVIEW_DIR"] {
+            for step in 0..<4 {
+                let frame = RotaryIcon.image(size: 264, phase: -Double(step) * .pi / 2)
+                let rep = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(frame.tiffRepresentation)))
+                try rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: directory).appendingPathComponent("native-phase-\(step).png"))
+            }
             let image = RotaryIcon.image(size: 528)
             let bitmap = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation)))
             try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: directory).appendingPathComponent("native-rotary.png"))
