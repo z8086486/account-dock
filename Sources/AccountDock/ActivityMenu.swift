@@ -241,7 +241,7 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
         let design = WheelDesign.current
         guard displayedDesign != design else { return }
         displayedDesign = design
-        item?.length = design == .rotary ? 20 : 24
+        item?.length = design == .rotary ? 14 : 20
         rotaryView?.pause(); rotaryView?.removeFromSuperview(); rotaryView = nil
         if let button = item?.button {
             if let layer = button.layer {
