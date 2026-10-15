@@ -4,7 +4,7 @@ Account Dock은 GitHub Releases에서 macOS 앱을 배포합니다. 현재 Apple
 
 ## 버전과 패키징
 
-Liquid Glass API 컴파일에는 macOS 26 SDK 이상이 필요합니다. GitHub Actions는 `macos-26` 환경에서 SDK 버전을 확인한 뒤 테스트와 개발 패키징을 수행합니다. 앱의 최소 실행 버전은 macOS 14이며, macOS 26 미만에서는 기본 머티리얼을 사용합니다.
+네이티브 팝오버의 최신 시스템 디자인을 적용하도록 macOS 26 SDK 이상으로 빌드합니다. GitHub Actions는 `macos-26` 환경에서 SDK 버전을 확인한 뒤 테스트와 개발 패키징을 수행합니다. 앱의 최소 실행 버전은 macOS 14이며, macOS 26 미만에서는 기본 머티리얼을 사용합니다.
 
 `Sources/AccountDock/Resources/release.json`에서 `version`과 `build`를 증가시킵니다. 정식 배포는 `channel: stable`을 사용하며 파일명에 preview 접미사를 붙이지 않습니다. Sparkle은 `build`를 비교하므로 반드시 이전 배포보다 큰 값을 사용합니다.
 

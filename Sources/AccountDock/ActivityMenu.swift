@@ -468,7 +468,8 @@ struct ActivityMenu: View {
             }
         }
         .padding(14).frame(width: 370, height: 650)
-        .modifier(ActivityGlassSurface())
+        // NSPopover owns the glass surface and its continuous outline, including the arrow.
+        // A second SwiftUI material here doubles the blur and creates overlapping corners.
         .foregroundStyle(.primary)
         .background(ActivityPanelReader(panel: panel).frame(width: 0, height: 0))
         .onChange(of: accounts.map(\.id)) { _, ids in
@@ -584,20 +585,6 @@ struct ActivityPanelReader: NSViewRepresentable {
         init(panel: ActivityPanelWindow) { self.panel = panel; super.init(frame: .zero) }
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
         override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); panel.window = window }
-    }
-}
-
-/// One glass surface for the panel, with ordinary translucent content cards.
-private struct ActivityGlassSurface: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    func body(content: Content) -> some View {
-        if reduceTransparency {
-            content.background(Color(nsColor: .windowBackgroundColor))
-        } else if #available(macOS 26.0, *) {
-            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
-        } else {
-            content.background(.regularMaterial)
-        }
     }
 }
 
