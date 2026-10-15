@@ -127,3 +127,6 @@ __pycache__/
 !/Sources/AccountDock/TokenCost.swift
 !/tests/AccountDockTests/TokenCostTests.swift
 !/Sources/AccountDock/PricingStore.swift
+
+# Reviewed wheel animation for the public README.
+!/assets/wheel-animation.gif
