@@ -239,9 +239,12 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
     }
     private func setRunning(_ count: Int) {
         guard let layer = item?.button?.layer else { return }
+        // Commit the visible angle before removing/replacing the animation.
+        // The model layer then keeps that angle while idle and across restarts.
+        Self.holdRotation(on: layer)
         if count > 0 {
             let spin = CAKeyframeAnimation(keyPath: "transform")
-            let phase = layer.presentation().map { atan2($0.transform.m12, $0.transform.m11) } ?? 0
+            let phase = atan2(layer.transform.m12, layer.transform.m11)
             // Native status-button layer coordinates are unflipped: negative angles turn clockwise.
             // Rotate around the visual center without changing AppKit's backing-layer anchor.
             let pivot = CGPoint(x: layer.bounds.width * (0.5 - layer.anchorPoint.x),
@@ -255,6 +258,14 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
             layer.add(spin, forKey: "codexWorking")
         } else { layer.removeAnimation(forKey: "codexWorking") }
         item?.button?.toolTip = count > 0 ? "Account Dock · Codex 작업 중" : "Account Dock · 대기 중"
+    }
+    static func holdRotation(on layer: CALayer) {
+        let visible = layer.presentation()?.transform ?? layer.transform
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.transform = visible
+        layer.removeAnimation(forKey: "codexWorking")
+        CATransaction.commit()
     }
     static func centeredRotation(angle: CGFloat, pivot: CGPoint) -> CATransform3D {
         var transform = CATransform3DMakeRotation(angle, 0, 0, 1)
@@ -374,7 +385,7 @@ struct ActivityMenu: View {
                 WheelPreview(size: 21)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Codex 활동").font(.system(size: 15, weight: .semibold))
-                    Text(monitor.snapshot.active ? "작업 중" : "대기 중").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                    Text(monitor.snapshot.active ? "작업 중" : "대기 중").font(.system(size: 12)).foregroundStyle(Color(nsColor: .secondaryLabelColor))
                 }
                 Spacer()
             }
@@ -402,9 +413,9 @@ struct ActivityMenu: View {
                 Text(monitor.snapshot.indexing ? "로컬 기록 집계 중…" : "이 Mac의 로컬 기록 기준")
                 Spacer()
                 if let date = monitor.snapshot.updatedAt { Text(date, style: .time).monospacedDigit() }
-            }.font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+            }.font(.system(size: 11)).foregroundStyle(Color(nsColor: .secondaryLabelColor))
             if monitor.snapshot.unreadableFiles > 0 {
-                Text("일부 기록을 읽을 수 없습니다.").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                Text("일부 기록을 읽을 수 없습니다.").font(.system(size: 12)).foregroundStyle(Color(nsColor: .secondaryLabelColor))
             }
                 }
             Divider()
@@ -423,40 +434,42 @@ struct ActivityMenu: View {
                     else if model.presets.isEmpty { Text("Account Dock에서 계정을 추가하세요.") }
                     ForEach(model.presets.filter { selected == "all" || accountID($0) == selected }) { preset in
                         VStack(alignment: .leading, spacing: 10) {
-                            HStack { Text(preset.displayName).fontWeight(.semibold); Spacer(); Text(preset.planLabel).foregroundStyle(DockTheme.muted) }
+                            HStack { Text(preset.displayName).fontWeight(.semibold); Spacer(); Text(preset.planLabel).foregroundStyle(Color(nsColor: .secondaryLabelColor)) }
                             if let id = accountID(preset) {
                                 let count = monitor.snapshot.activeAccounts[id, default: 0]
                                 HStack(spacing: 6) {
-                                    Circle().fill(count > 0 ? DockTheme.orange : DockTheme.muted.opacity(0.4)).frame(width: 6, height: 6)
+                                    Circle().fill(count > 0 ? DockTheme.orange : Color(nsColor: .secondaryLabelColor).opacity(0.4)).frame(width: 6, height: 6)
                                     Text(count > 0 ? "작업 중 · 대화 \(count)개" : (monitor.snapshot.observedAccounts.contains(id) ? "대기 중" : "활동 기록 없음"))
-                                        .foregroundStyle(count > 0 ? DockTheme.orange : DockTheme.muted)
+                                        .foregroundStyle(count > 0 ? DockTheme.orange : Color(nsColor: .secondaryLabelColor))
                                 }
                             }
                             if let id = accountID(preset) {
                                 if visibleSnapshot.days.values.contains(where: { $0[id] != nil }) {
                                     Text("이 Mac · 오늘 \(visibleSnapshot.tokens(account: id, day: ActivitySnapshot.day(Date())).formatted()) · 누적 \(visibleSnapshot.tokens(account: id).formatted()) 토큰")
-                                        .foregroundStyle(DockTheme.muted)
+                                        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                                 } else {
                                     Text("집계된 토큰 기록 없음 · 계정 확인 이후 기록부터 반영")
-                                        .foregroundStyle(DockTheme.muted)
+                                        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                                 }
                             }
                             if usageEnabled { AccountUsageView(report: report(preset), loading: report(preset) == nil && model.usageLoading.contains(preset.id), compact: true) }
                         }.font(.system(size: 12)).padding(12)
-                            .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                            .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.06)))
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
               }.padding(.top, 4)
             }
             HStack {
                 Text("등록한 계정의 로컬 기록")
-                .font(.system(size: 11)).foregroundStyle(DockTheme.muted).fixedSize(horizontal: false, vertical: true)
+                .font(.system(size: 11)).foregroundStyle(Color(nsColor: .secondaryLabelColor)).fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 Button("종료") { NSApp.terminate(nil) }.buttonStyle(.plain).font(.system(size: 12)).fixedSize()
             }
         }
-        .padding(14).frame(width: 370, height: 650).background(DockTheme.canvas)
-        .foregroundStyle(DockTheme.navy).preferredColorScheme(.light)
+        .padding(14).frame(width: 370, height: 650)
+        .modifier(ActivityGlassSurface())
+        .foregroundStyle(.primary)
         .background(ActivityPanelReader(panel: panel).frame(width: 0, height: 0))
         .onChange(of: accounts.map(\.id)) { _, ids in
             if selected != "all" && !ids.contains(selected) { selected = "all" }
@@ -484,7 +497,7 @@ struct ActivityMenu: View {
     }
     private func metric(_ title: String, value: Int64) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+            Text(title).font(.system(size: 11)).foregroundStyle(Color(nsColor: .secondaryLabelColor))
             Text(value.formatted()).font(.system(size: 17, weight: .semibold, design: .rounded)).monospacedDigit().minimumScaleFactor(0.6).lineLimit(1)
         }.frame(maxWidth: .infinity, alignment: .leading).padding(9)
             .background(DockTheme.blue.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
@@ -507,16 +520,16 @@ struct ActivityHeatmap: View {
         let days = dates
         let maximum = max(1, days.map { snapshot.tokens(account: account, day: ActivitySnapshot.day($0)) }.max() ?? 1)
         VStack(alignment: .leading, spacing: 7) {
-            HStack { Text("최근 21주"); Spacer(); Text("토큰 사용량") }.font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+            HStack { Text("최근 21주"); Spacer(); Text("토큰 사용량") }.font(.system(size: 11)).foregroundStyle(Color(nsColor: .secondaryLabelColor))
             HStack(alignment: .top, spacing: 4) {
                 ForEach(0..<21, id: \.self) { week in
                     VStack(spacing: 4) {
                         ForEach(0..<7, id: \.self) { weekday in
                             let date = days[week * 7 + weekday]
                             let value = snapshot.tokens(account: account, day: ActivitySnapshot.day(date))
-                            let opacity = value == 0 ? 0.07 : 0.25 + 0.75 * sqrt(Double(value) / Double(maximum))
+                            let level = GulfActivityPalette.level(value: value, maximum: maximum)
                             RoundedRectangle(cornerRadius: 2)
-                                .fill(date > Date() ? .clear : DockTheme.navy.opacity(opacity))
+                                .fill(date > Date() ? .clear : GulfActivityPalette.color(level: level))
                                 .frame(width: 10, height: 10)
                                 .onHover { inside in
                                     if date <= Date() { hoveredIndex = inside ? week * 7 + weekday : nil }
@@ -540,12 +553,20 @@ struct ActivityHeatmap: View {
                     .font(.system(size: 11)).monospacedDigit().padding(9)
                     .frame(width: 215, alignment: .leading)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(DockTheme.muted.opacity(0.2)))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .secondaryLabelColor).opacity(0.2)))
                     .shadow(color: .black.opacity(0.15), radius: 5, y: 2)
                     .offset(x: min(max(CGFloat(index / 7) * 14 - 100, 0), 100), y: index % 7 < 4 ? CGFloat(index % 7) * 14 + 14 : CGFloat(index % 7) * 14 - 88)
                     .allowsHitTesting(false)
                 }
             }.zIndex(10)
+            HStack(spacing: 4) {
+                Spacer()
+                Text("적음")
+                ForEach(0..<5, id: \.self) { level in
+                    RoundedRectangle(cornerRadius: 2).fill(GulfActivityPalette.color(level: level)).frame(width: 10, height: 10)
+                }
+                Text("많음")
+            }.font(.system(size: 10)).foregroundStyle(.secondary)
         }.zIndex(10)
     }
 }
@@ -563,5 +584,35 @@ struct ActivityPanelReader: NSViewRepresentable {
         init(panel: ActivityPanelWindow) { self.panel = panel; super.init(frame: .zero) }
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
         override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); panel.window = window }
+    }
+}
+
+/// One glass surface for the panel, with ordinary translucent content cards.
+private struct ActivityGlassSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(Color(nsColor: .windowBackgroundColor))
+        } else if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
+        } else {
+            content.background(.regularMaterial)
+        }
+    }
+}
+
+enum GulfActivityPalette {
+    static func level(value: Int64, maximum: Int64) -> Int {
+        guard value > 0 else { return 0 }
+        return min(4, max(1, Int(ceil(sqrt(Double(value) / Double(max(1, maximum))) * 4))))
+    }
+    static func color(level: Int) -> Color {
+        switch level {
+        case 1: return Color(red: 0.73, green: 0.87, blue: 0.91)
+        case 2: return Color(red: 0.40, green: 0.70, blue: 0.80)
+        case 3: return Color(red: 0.96, green: 0.64, blue: 0.37)
+        case 4: return DockTheme.orange
+        default: return Color.primary.opacity(0.07)
+        }
     }
 }

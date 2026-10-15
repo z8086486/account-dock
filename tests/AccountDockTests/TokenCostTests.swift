@@ -50,6 +50,28 @@ final class TokenCostTests: XCTestCase {
         XCTAssertEqual(state.days["2026-10-14"]?["a"], 202_000)
         XCTAssertEqual(state.costs?["2026-10-14"]?["a"]?.tokens, 202_000)
     }
+    func testInheritedCounterDoesNotBecomeDailyUsageAndMigrationRepairsOldBucket() throws {
+        let first = try event("event_msg", ["type": "token_count", "info": [
+            "total_token_usage": ["total_tokens": 2_500_101_000], "last_token_usage": usage()]])
+        for migrated in [false, true] {
+            var state = ActivityLogState(); state.account = "a"; state.model = "gpt-6.1-sol"
+            if migrated {
+                state.days = ["2026-10-14": ["a": 2_500_101_000, "other": 42]]
+                state.replayUntil = 100
+            }
+            state.consume(first, at: 0)
+            XCTAssertEqual(state.days["2026-10-14"]?["a"], 101_000)
+            state.consume(first, at: 0)
+            XCTAssertEqual(state.days["2026-10-14"]?["a"], 101_000)
+            state.consume(try event("event_msg", ["type": "token_count", "info": [
+                "total_token_usage": ["total_tokens": 2_500_202_000], "last_token_usage": usage()]]), at: 100)
+            XCTAssertEqual(state.days["2026-10-14"]?["a"], 202_000)
+            XCTAssertEqual(state.costs?["2026-10-14"]?["a"]?.tokens, 202_000)
+            if migrated { XCTAssertEqual(state.days["2026-10-14"]?["other"], 42) }
+            let restored = try JSONDecoder().decode(ActivityLogState.self, from: JSONEncoder().encode(state))
+            XCTAssertEqual(restored.previousTotal, 2_500_202_000)
+        }
+    }
     func testAccountAndDayCostFilters() {
         var snapshot = ActivitySnapshot()
         snapshot.costs = ["2026-10-14": ["a": TokenCost(usd: 1, tokens: 20), "b": TokenCost(usd: 2, tokens: 40)]]

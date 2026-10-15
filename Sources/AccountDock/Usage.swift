@@ -124,14 +124,14 @@ struct AccountUsageView: View {
         VStack(alignment: .leading, spacing: compact ? 8 : 12) {
             if loading {
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("사용량 확인 중…") }
-                    .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                    .font(.system(size: 12)).foregroundStyle((compact ? Color(nsColor: .secondaryLabelColor) : DockTheme.muted))
             } else if let report {
                 if report.status == "login_required" {
                     Label("사용량 조회를 위해 이 계정으로 다시 로그인해 주세요.", systemImage: "lock.rotation")
-                        .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                        .font(.system(size: 12)).foregroundStyle((compact ? Color(nsColor: .secondaryLabelColor) : DockTheme.muted))
                 } else if report.windows.isEmpty && report.activity.isEmpty && (report.credits ?? []).isEmpty && report.resetCredits == nil {
                     Text("사용량 정보를 제공받지 못했습니다. 잠시 후 다시 확인해 주세요.")
-                        .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                        .font(.system(size: 12)).foregroundStyle((compact ? Color(nsColor: .secondaryLabelColor) : DockTheme.muted))
                 }
                 ForEach(report.windows) { window in
                     VStack(alignment: .leading, spacing: 6) {
@@ -143,14 +143,14 @@ struct AccountUsageView: View {
                         }
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
-                                Capsule().fill(DockTheme.navy.opacity(0.07))
+                                Capsule().fill(Color.primary.opacity(0.07))
                                 Capsule().fill(window.remainingPercent <= 20 ? DockTheme.orange : DockTheme.blue)
                                     .frame(width: geo.size.width * min(100, max(0, window.remainingPercent)) / 100)
                             }
                         }.frame(height: 6)
                         if !compact, let reset = window.resetsAt {
                             Text("초기화 · \(Date(timeIntervalSince1970: reset).formatted(date: .abbreviated, time: .shortened))")
-                                .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                                .font(.system(size: 12)).foregroundStyle((compact ? Color(nsColor: .secondaryLabelColor) : DockTheme.muted))
                         }
                     }
                 }
@@ -164,23 +164,23 @@ struct AccountUsageView: View {
                 }
                 if !compact, let count = report.resetCredits {
                     HStack { Text("한도 초기화 보상"); Spacer(); Text("\(count)회 남음") }
-                        .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                        .font(.system(size: 12)).foregroundStyle((compact ? Color(nsColor: .secondaryLabelColor) : DockTheme.muted))
                 }
                 if !compact && (report.credits ?? []).isEmpty && ["available", "partial"].contains(report.status) {
                     Text("크레딧 잔액 · 확인할 수 없음")
-                        .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                        .font(.system(size: 12)).foregroundStyle((compact ? Color(nsColor: .secondaryLabelColor) : DockTheme.muted))
                 }
                 if !compact, let lifetime = report.activity["lifetimeTokens"] {
                     Text("Codex 조회 누적 토큰 · \(lifetime.formatted(.number.precision(.fractionLength(0))))")
-                        .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                        .font(.system(size: 12)).foregroundStyle((compact ? Color(nsColor: .secondaryLabelColor) : DockTheme.muted))
                         .help("Codex account/usage/read에서 조회한 값입니다. 이 Mac의 로그 합계나 OpenAI API 청구 내역과는 다를 수 있습니다. 모델별 토큰 내역이 없어 비용으로 환산하지 않습니다.")
                 }
                 if let checked = report.checkedAt {
                     Text("확인 · \(Date(timeIntervalSince1970: checked).formatted(date: .omitted, time: .shortened)) · Codex 기준")
-                        .font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                        .font(.system(size: 12)).foregroundStyle((compact ? Color(nsColor: .secondaryLabelColor) : DockTheme.muted))
                 }
             } else {
-                Text("사용량을 아직 확인하지 않았습니다.").font(.system(size: 12)).foregroundStyle(DockTheme.muted)
+                Text("사용량을 아직 확인하지 않았습니다.").font(.system(size: 12)).foregroundStyle((compact ? Color(nsColor: .secondaryLabelColor) : DockTheme.muted))
             }
         }
     }

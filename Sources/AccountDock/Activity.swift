@@ -104,11 +104,27 @@ struct ActivityLogState: Sendable, Codable {
               number.doubleValue >= 0, number.doubleValue < 1e15 else { return }
         let total = number.int64Value
         // Duplicate and older cumulative events must never inflate usage.
-        let delta = max(0, total - previousTotal)
+        let firstCounter = previousTotal == 0
+        var delta = max(0, total - previousTotal)
         previousTotal = max(previousTotal, total)
         guard delta > 0, let date else { return }
         let resolved = (attributionStart.map { position >= $0 } ?? false) ? (attributedAccount ?? account) : account
         let day = ActivitySnapshot.day(date)
+        // A resumed log may start with a lifetime counter inherited from earlier
+        // history. Only its explicit last request belongs to this event's day.
+        if firstCounter, let last = info["last_token_usage"] as? [String: Any],
+           let lastTotal = TokenPricing.count(last["total_tokens"]), lastTotal < total,
+           let input = TokenPricing.count(last["input_tokens"]),
+           let output = TokenPricing.count(last["output_tokens"]), input + output == lastTotal {
+            let inherited = total - lastTotal
+            delta = lastTotal
+            if position < (replayUntil ?? 0) {
+                // Repair the old daily bucket once while replaying metadata;
+                // preserve account attribution for all subsequent events.
+                let old = days[day]?[resolved] ?? 0
+                days[day]?[resolved] = max(0, old - inherited)
+            }
+        }
         if position >= (replayUntil ?? 0) { days[day, default: [:]][resolved, default: 0] += delta }
         if let last = info["last_token_usage"] as? [String: Any],
            let cost = TokenPricing.estimate(model: model, usage: last, expected: delta) {
@@ -157,10 +173,10 @@ actor ActivityScanner {
         if let cacheURL, let attrs = try? FileManager.default.attributesOfItem(atPath: cacheURL.path),
            (attrs[.size] as? NSNumber)?.intValue ?? Int.max < 20_000_000,
            let data = try? Data(contentsOf: cacheURL), let cache = try? JSONDecoder().decode(Cache.self, from: data),
-           [1, 2, 3].contains(cache.version), cache.root == root.path {
+           [1, 2, 3, 4].contains(cache.version), cache.root == root.path {
             files = Dictionary(uniqueKeysWithValues: cache.files.map { path, original in
                 var state = original
-                if cache.version < 3 {
+                if cache.version < 4 {
                     state.costs = nil; state.model = nil
                     // Re-read pricing metadata while retaining previously attributed token totals.
                     state.replayUntil = max(state.replayUntil ?? 0, state.offset)
@@ -285,7 +301,7 @@ actor ActivityScanner {
                 saved.pending = Data() // Never persist conversation text, even a partial line.
                 return (url.path, saved)
             })
-            if let data = try? JSONEncoder().encode(Cache(version: 3, root: root.path, files: sanitized)) {
+            if let data = try? JSONEncoder().encode(Cache(version: 4, root: root.path, files: sanitized)) {
                 try? fm.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true,
                     attributes: [.posixPermissions: 0o700])
                 try? data.write(to: cacheURL, options: .atomic)

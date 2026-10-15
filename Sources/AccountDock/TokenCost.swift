@@ -93,12 +93,15 @@ struct TokenCostView: View {
                         }.font(.system(size: 12)).padding(16).frame(width: 310)
                     }
             }
-            HStack { Text("오늘"); Spacer(); Text(pricing.label(today)) }
-            HStack { Text("누적"); Spacer(); Text(pricing.label(total)) }
+            HStack { Text("오늘 · 환산 가능분"); Spacer(); Text(pricing.label(today)) }
+            HStack { Text("누적 · 환산 가능분"); Spacer(); Text(pricing.label(total)) }
             if total.tokens < snapshot.tokens(account: account) {
-                Text("세부 내역이 확인된 토큰만 환산").font(.system(size: 10)).foregroundStyle(DockTheme.muted)
+                Text("누적 \(total.tokens.formatted()) / \(snapshot.tokens(account: account).formatted()) 토큰 · \(Double(total.tokens) / Double(max(1, snapshot.tokens(account: account))) * 100, specifier: "%.1f")% 환산")
+                    .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("모델·세부 내역을 확인할 수 없는 토큰은 제외됩니다.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
             }
-        }.font(.system(size: 11)).monospacedDigit().foregroundStyle(DockTheme.muted)
+        }.font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
         .task { await pricing.refresh() }
     }
 }

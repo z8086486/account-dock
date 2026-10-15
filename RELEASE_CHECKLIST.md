@@ -1,6 +1,6 @@
 # 지원 및 검증
 
-Account Dock 1.0.0은 macOS 14 이상·Apple Silicon용입니다. Apple Developer ID 서명·공증은 적용하지 않습니다. 배포 방식은 [배포 가이드](RELEASING.md)를 참고하세요.
+Account Dock 1.1.0은 macOS 14 이상·Apple Silicon용입니다. Apple Developer ID 서명·공증은 적용하지 않습니다. 배포 방식은 [배포 가이드](RELEASING.md)를 참고하세요.
 
 ## 확인한 범위
 
@@ -18,6 +18,14 @@ Account Dock 1.0.0은 macOS 14 이상·Apple Silicon용입니다. Apple Develope
 | 업데이트 | 공개 ZIP·피드 체크섬·서명 검증, 0.11.0 build 27 → 28 앱 내 교체·재실행, 저장 계정 2개와 사용량 조회 유지 |
 
 실제 계정 정보와 원본 작업 기록은 공개 테스트 자료에 포함하지 않습니다. README 화면은 예시 계정으로 렌더링합니다.
+
+## 1.1.0 변경 검증
+
+- 네이티브 글래스·시스템 글자색, Gulf 활동 색상과 범례
+- 정지 각도 유지 및 재시작 회전 연결
+- 첫 누적 카운터의 이전 사용량 제외, 기존 캐시 날짜별 합계 보정 및 중복 보정 방지
+- 비용 환산 대상 토큰 수·비율 표시
+- Swift 테스트 55개 중 환경별 제외 2개, 실패 없음
 
 ## 1.0.0 릴리즈 검증
 

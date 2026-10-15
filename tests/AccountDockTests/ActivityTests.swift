@@ -3,6 +3,25 @@ import AppKit
 @testable import AccountDock
 
 final class ActivityTests: XCTestCase {
+    @MainActor func testPausedWheelKeepsItsModelAngleWhenNoPresentationLayerExists() {
+        let layer = CALayer()
+        let pose = MenuBarController.centeredRotation(angle: -1.37, pivot: CGPoint(x: 14, y: 11))
+        layer.transform = pose
+        MenuBarController.holdRotation(on: layer)
+        XCTAssertTrue(CATransform3DEqualToTransform(layer.transform, pose))
+        MenuBarController.holdRotation(on: layer)
+        XCTAssertEqual(atan2(layer.transform.m12, layer.transform.m11), -1.37, accuracy: 0.00001)
+        XCTAssertNil(layer.animation(forKey: "codexWorking"))
+    }
+    func testGulfHeatmapLevelsRemainBoundedAndOrdered() {
+        XCTAssertEqual(GulfActivityPalette.level(value: 0, maximum: 0), 0)
+        XCTAssertEqual(GulfActivityPalette.level(value: 1, maximum: 100), 1)
+        XCTAssertEqual(GulfActivityPalette.level(value: 100, maximum: 100), 4)
+        XCTAssertEqual(GulfActivityPalette.level(value: 200, maximum: 100), 4)
+        let levels = (0...100).map { GulfActivityPalette.level(value: Int64($0), maximum: 100) }
+        XCTAssertEqual(levels, levels.sorted())
+    }
+
     private func line(_ type: String, _ payload: [String: Any], at: String = "2026-10-13T10:00:00.000Z") throws -> Data {
         var data = try JSONSerialization.data(withJSONObject: ["type": type, "timestamp": at, "payload": payload])
         data.append(10); return data
