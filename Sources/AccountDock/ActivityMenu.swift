@@ -605,35 +605,65 @@ struct ActivityPanelReader: NSViewRepresentable {
     }
 }
 
-/// A cached wheel image animated by Core Animation only while this panel exists.
+/// A stable image layer, separate from the view layer managed by AppKit layout.
 private struct PanelWheel: NSViewRepresentable {
     let design: WheelDesign
     let count: Int
-    func makeNSView(context: Context) -> WheelView {
-        let view = WheelView(frame: NSRect(x: 0, y: 0, width: 36, height: 36))
-        view.wantsLayer = true
-        view.imageScaling = .scaleProportionallyUpOrDown
-        return view
+    func makeNSView(context: Context) -> PanelWheelView {
+        PanelWheelView(frame: NSRect(x: 0, y: 0, width: 36, height: 36))
     }
-    func updateNSView(_ view: WheelView, context: Context) {
-        if view.design != design {
-            view.image = WheelIcon.image(size: 36, design: design)
-            view.design = design
+    func updateNSView(_ view: PanelWheelView, context: Context) {
+        view.configure(design: design, count: count)
+    }
+    static func dismantleNSView(_ view: PanelWheelView, coordinator: ()) {
+        MenuBarController.holdRotation(on: view.wheelLayer)
+    }
+}
+
+@MainActor
+final class PanelWheelView: NSView {
+    let wheelLayer = CALayer()
+    private var design: WheelDesign?
+    private var count: Int?
+    override var allowsVibrancy: Bool { false }
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        wheelLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        wheelLayer.contentsGravity = .resizeAspect
+        layer?.addSublayer(wheelLayer)
+        layoutWheel()
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func layout() { super.layout(); layoutWheel() }
+    private func layoutWheel() {
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        let side = min(bounds.width, bounds.height)
+        wheelLayer.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+        wheelLayer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        CATransaction.commit()
+    }
+    func configure(design: WheelDesign, count: Int) {
+        if self.design != design { self.design = design; renderImage() }
+        if self.count != count {
+            MenuBarController.animateWheel(layer: wheelLayer, count: count)
+            self.count = count
         }
-        if view.count != count, let layer = view.layer {
-            MenuBarController.animateWheel(layer: layer, count: count)
-            view.count = count
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance(); renderImage()
+    }
+    private func renderImage() {
+        guard let design else { return }
+        // Render once at 3x resolution. Opaque system ink stays sharp over native glass.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let image = WheelIcon.menuImage(size: 108, color: .labelColor, design: design)
+            var rect = CGRect(x: 0, y: 0, width: 108, height: 108)
+            wheelLayer.contents = image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+            wheelLayer.contentsScale = 3
         }
     }
-    static func dismantleNSView(_ view: WheelView, coordinator: ()) {
-        if let layer = view.layer { MenuBarController.holdRotation(on: layer) }
-    }
-    final class WheelView: NSImageView {
-        var design: WheelDesign?
-        var count: Int?
-        // The enclosing SwiftUI button owns clicks and keyboard accessibility.
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 enum GulfActivityPalette {

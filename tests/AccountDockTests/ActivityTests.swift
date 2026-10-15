@@ -3,6 +3,22 @@ import AppKit
 @testable import AccountDock
 
 final class ActivityTests: XCTestCase {
+    @MainActor func testPanelWheelRotatesInPlaceAcrossLayoutChanges() throws {
+        let view = PanelWheelView(frame: NSRect(x: 0, y: 0, width: 36, height: 36))
+        view.configure(design: .meisterS1, count: 2)
+        XCTAssertTrue(view.wheelLayer !== view.layer)
+        let spin = try XCTUnwrap(view.wheelLayer.animation(forKey: "codexWorking") as? CAKeyframeAnimation)
+        for value in try XCTUnwrap(spin.values as? [NSValue]) {
+            XCTAssertEqual(value.caTransform3DValue.m41, 0, accuracy: 0.00001)
+            XCTAssertEqual(value.caTransform3DValue.m42, 0, accuracy: 0.00001)
+        }
+        view.frame.size = NSSize(width: 42, height: 40)
+        view.layout()
+        XCTAssertEqual(view.wheelLayer.position, CGPoint(x: 21, y: 20))
+        XCTAssertEqual(view.wheelLayer.bounds.size, CGSize(width: 40, height: 40))
+        view.configure(design: .meisterS1, count: 0)
+        XCTAssertNil(view.wheelLayer.animation(forKey: "codexWorking"))
+    }
     @MainActor func testPausedWheelKeepsItsModelAngleWhenNoPresentationLayerExists() {
         let layer = CALayer()
         let pose = MenuBarController.centeredRotation(angle: -1.37, pivot: CGPoint(x: 14, y: 11))
