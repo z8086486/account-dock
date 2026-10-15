@@ -5,10 +5,11 @@ import QuartzCore
 
 enum WheelDesign: String, CaseIterable, Identifiable {
     case classic
+    case rotary
     case fiveSpoke = "meisterS1" // Preserve the existing saved preference.
     static let preferenceKey = "accountDock.wheelDesign"
     var id: String { rawValue }
-    var title: String { self == .classic ? "기본 · 8스포크" : "5스포크 · 볼트 림" }
+    var title: String { switch self { case .classic: "기본 · 8스포크"; case .fiveSpoke: "5스포크 · 볼트 림"; case .rotary: "로터리 엔진" } }
     static var current: WheelDesign {
         WheelDesign(rawValue: UserDefaults.standard.string(forKey: preferenceKey) ?? "") ?? .classic
     }
@@ -19,6 +20,7 @@ enum WheelDesign: String, CaseIterable, Identifiable {
 @MainActor
 enum WheelIcon {
     static func image(angle: CGFloat = 0, size: CGFloat = 20, color: NSColor = .black, design: WheelDesign = .current) -> NSImage {
+        if design == .rotary { return RotaryIcon.image(size: size) }
         if design == .fiveSpoke { return fiveSpoke(size: size, angle: angle, color: color, template: false) }
         let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             color.setFill()
@@ -87,6 +89,7 @@ enum WheelIcon {
     }
     /// A single silhouette uses the menu bar's appearance, while the asymmetric valve marks rim rotation.
     static func menuImage(size: CGFloat, color: NSColor, design: WheelDesign = .current) -> NSImage {
+        if design == .rotary { return RotaryIcon.image(size: size, template: true, color: color) }
         if design == .fiveSpoke { return fiveSpoke(size: size, color: color, template: true) }
         return NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             let context = NSGraphicsContext.current!.cgContext
@@ -202,11 +205,13 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
     private var subscription: AnyCancellable?
     private var designSubscription: AnyCancellable?
     private var displayedDesign: WheelDesign?
+    private var rotaryView: RotaryIconView?
+    private var runningCount = 0
     private var outsideMonitor: Any?
     private var localMonitor: Any?
     private var resignObserver: NSObjectProtocol?
     static func rotationDuration(conversations: Int) -> Double {
-        max(0.8, 2.0 / sqrt(Double(max(1, conversations))))
+        max(0.8, 1.6 / sqrt(Double(max(1, conversations))))
     }
     private weak var model: DockModel?
     private weak var monitor: ActivityMonitor?
@@ -236,13 +241,30 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
         let design = WheelDesign.current
         guard displayedDesign != design else { return }
         displayedDesign = design
-        let image = WheelIcon.menuImage(size: 20, color: .black, design: design)
-        image.isTemplate = true
-        item?.button?.image = image
+        item?.length = design == .rotary ? 20 : 24
+        rotaryView?.pause(); rotaryView?.removeFromSuperview(); rotaryView = nil
+        if let button = item?.button {
+            if let layer = button.layer {
+                Self.holdRotation(on: layer)
+                CATransaction.begin(); CATransaction.setDisableActions(true)
+                layer.transform = CATransform3DIdentity; CATransaction.commit()
+            }
+            if design == .rotary {
+                button.image = nil
+                let view = RotaryIconView(frame: NSRect(x: (button.bounds.width-20)/2, y: (button.bounds.height-20)/2, width: 20, height: 20), template: true)
+                view.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+                button.addSubview(view); rotaryView = view
+            } else {
+                let image = WheelIcon.menuImage(size: 20, color: .black, design: design)
+                image.isTemplate = true; button.image = image
+            }
+        }
+        setRunning(runningCount)
     }
     private func setRunning(_ count: Int) {
-        guard let layer = item?.button?.layer else { return }
-        Self.animateWheel(layer: layer, count: count)
+        runningCount = count
+        if let rotaryView { rotaryView.configure(count: count) }
+        else if let layer = item?.button?.layer { Self.animateWheel(layer: layer, count: count) }
         item?.button?.toolTip = count > 0 ? "Account Dock · Codex 작업 중" : "Account Dock · 대기 중"
     }
     static func animateWheel(layer: CALayer, count: Int) {
@@ -617,13 +639,14 @@ private struct PanelWheel: NSViewRepresentable {
         view.configure(design: design, count: count)
     }
     static func dismantleNSView(_ view: PanelWheelView, coordinator: ()) {
-        MenuBarController.holdRotation(on: view.wheelLayer)
+        view.stopAnimation()
     }
 }
 
 @MainActor
 final class PanelWheelView: NSView {
     let wheelLayer = CALayer()
+    private var rotaryView: RotaryIconView?
     private var design: WheelDesign?
     private var count: Int?
     override var allowsVibrancy: Bool { false }
@@ -642,20 +665,32 @@ final class PanelWheelView: NSView {
         let side = min(bounds.width, bounds.height)
         wheelLayer.bounds = CGRect(x: 0, y: 0, width: side, height: side)
         wheelLayer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        rotaryView?.frame = bounds
         CATransaction.commit()
     }
     func configure(design: WheelDesign, count: Int) {
-        if self.design != design { self.design = design; renderImage() }
-        if self.count != count {
-            MenuBarController.animateWheel(layer: wheelLayer, count: count)
-            self.count = count
+        let changed = self.design != design
+        if changed {
+            stopAnimation(); rotaryView?.removeFromSuperview(); rotaryView = nil
+            self.design = design
+            wheelLayer.isHidden = design == .rotary
+            if design == .rotary {
+                let view = RotaryIconView(frame: bounds, template: false)
+                view.autoresizingMask = [.width, .height]; addSubview(view); rotaryView = view
+            } else { renderImage() }
         }
+        if let rotaryView { rotaryView.configure(count: count) }
+        else if changed || self.count != count { MenuBarController.animateWheel(layer: wheelLayer, count: count) }
+        self.count = count
+    }
+    func stopAnimation() {
+        MenuBarController.holdRotation(on: wheelLayer); rotaryView?.pause()
     }
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance(); renderImage()
     }
     private func renderImage() {
-        guard let design else { return }
+        guard let design, design != .rotary else { return }
         // Render once at 3x resolution. Opaque system ink stays sharp over native glass.
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let image = WheelIcon.menuImage(size: 108, color: .labelColor, design: design)

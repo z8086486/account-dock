@@ -2,5 +2,5 @@
 import PackageDescription
 let package = Package(name: "AccountDock", platforms: [.macOS(.v14)],
     dependencies: [.package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0")],
-    targets: [.executableTarget(name: "AccountDock", dependencies: [.product(name: "Sparkle", package: "Sparkle")], resources: [.copy("Resources/release.json"), .copy("Resources/AccountDock.png"), .copy("Resources/AppIcon.icns")], linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
+    targets: [.executableTarget(name: "AccountDock", dependencies: [.product(name: "Sparkle", package: "Sparkle")], resources: [.copy("Resources/RotaryGeometry.json"), .copy("Resources/release.json"), .copy("Resources/AccountDock.png"), .copy("Resources/AppIcon.icns")], linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
               .testTarget(name: "AccountDockTests", dependencies: ["AccountDock"], path: "tests/AccountDockTests") ])

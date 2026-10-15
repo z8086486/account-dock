@@ -73,7 +73,7 @@ struct WheelDesignPanel: View {
     @AppStorage(WheelDesign.preferenceKey) private var selection = WheelDesign.classic.rawValue
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("메뉴바 휠").font(.system(size: 17, weight: .semibold))
+            Text("메뉴바 아이콘").font(.system(size: 17, weight: .semibold))
             HStack(spacing: 12) {
                 ForEach(WheelDesign.allCases) { design in
                     Button { selection = design.rawValue } label: {

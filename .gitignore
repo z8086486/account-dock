@@ -137,3 +137,7 @@ __pycache__/
 !/licenses/
 /licenses/*
 !/licenses/Sparkle-LICENSE.txt
+
+# Original rotary icon artwork and native animation.
+!/Sources/AccountDock/RotaryIcon.swift
+!/Sources/AccountDock/Resources/RotaryGeometry.json

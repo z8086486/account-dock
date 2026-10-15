@@ -3,6 +3,55 @@ import AppKit
 @testable import AccountDock
 
 final class ActivityTests: XCTestCase {
+    @MainActor func testRotaryKeepsHousingFixedAndPreservesPhase() throws {
+        let view = RotaryIconView(frame: NSRect(x: 0, y: 0, width: 36, height: 36), template: false)
+        view.configure(count: 1)
+        let orbit = try XCTUnwrap(view.orbitLayer.animation(forKey: "rotaryOrbit") as? CAKeyframeAnimation)
+        let spin = try XCTUnwrap(view.rotorLayer.animation(forKey: "rotarySpin") as? CABasicAnimation)
+        XCTAssertEqual(spin.duration, orbit.duration * 3, accuracy: 0.000001)
+        XCTAssertNil(view.housingLayer.animationKeys())
+        XCTAssertNil(view.shaftLayer.animationKeys())
+        let positions = try XCTUnwrap(orbit.values as? [NSValue])
+        for position in positions {
+            let p = position.pointValue
+            XCTAssertEqual(hypot(p.x - 18, p.y - 18), 36 * 12 / 264, accuracy: 0.00001)
+        }
+        view.pause()
+        let paused = view.currentPhase()
+        XCTAssertEqual(paused, view.currentPhase(at: CACurrentMediaTime() + 100), accuracy: 0.00001)
+        XCTAssertNil(view.orbitLayer.animationKeys())
+        view.configure(count: 4)
+        XCTAssertEqual(view.phase, paused, accuracy: 0.00001)
+        XCTAssertEqual(try XCTUnwrap(view.rotorLayer.animation(forKey: "rotarySpin")).duration, 2.4, accuracy: 0.00001)
+        view.pause()
+    }
+    @MainActor func testRotarySelectionSwitchesWithoutSpinningHousingOrLeavingLayers() {
+        let view = PanelWheelView(frame: NSRect(x: 0, y: 0, width: 36, height: 36))
+        view.configure(design: .fiveSpoke, count: 1)
+        view.configure(design: .rotary, count: 1)
+        XCTAssertTrue(view.wheelLayer.isHidden)
+        XCTAssertNil(view.wheelLayer.animation(forKey: "codexWorking"))
+        XCTAssertEqual(view.subviews.compactMap { $0 as? RotaryIconView }.count, 1)
+        view.configure(design: .classic, count: 1)
+        XCTAssertFalse(view.wheelLayer.isHidden)
+        XCTAssertTrue(view.subviews.isEmpty)
+        XCTAssertNotNil(view.wheelLayer.animation(forKey: "codexWorking"))
+        view.stopAnimation()
+    }
+    @MainActor func testRotaryArtworkLoadsAndRenders() throws {
+        XCTAssertGreaterThan(RotaryIcon.geometry["rotor"]?.count ?? 0, 100)
+        XCTAssertEqual(RotaryIcon.geometry["bolts"]?.count, 18)
+        for part in [RotaryIcon.Part.housing, .rotor, .shaft, .complete] {
+            let image = RotaryIcon.image(size: 264, part: part)
+            var rect = CGRect(x: 0, y: 0, width: 264, height: 264)
+            XCTAssertNotNil(image.cgImage(forProposedRect: &rect, context: nil, hints: nil))
+        }
+        if let directory = ProcessInfo.processInfo.environment["ROTARY_PREVIEW_DIR"] {
+            let image = RotaryIcon.image(size: 528)
+            let bitmap = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation)))
+            try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: directory).appendingPathComponent("native-rotary.png"))
+        }
+    }
     @MainActor func testPanelWheelRotatesInPlaceAcrossLayoutChanges() throws {
         let view = PanelWheelView(frame: NSRect(x: 0, y: 0, width: 36, height: 36))
         view.configure(design: .fiveSpoke, count: 2)
@@ -74,8 +123,8 @@ final class ActivityTests: XCTestCase {
         XCTAssertEqual(state.days.values.reduce(0) { $0 + $1["work", default: 0] }, 35)
     }
     @MainActor func testWheelSpeedIncreasesWithConversationCountAndIsCapped() {
-        XCTAssertEqual(MenuBarController.rotationDuration(conversations: 1), 2)
-        XCTAssertLessThan(MenuBarController.rotationDuration(conversations: 2), 2)
+        XCTAssertEqual(MenuBarController.rotationDuration(conversations: 1), 1.6)
+        XCTAssertLessThan(MenuBarController.rotationDuration(conversations: 2), 1.6)
         XCTAssertLessThan(MenuBarController.rotationDuration(conversations: 4), MenuBarController.rotationDuration(conversations: 2))
         XCTAssertEqual(MenuBarController.rotationDuration(conversations: 100), 0.8)
     }
