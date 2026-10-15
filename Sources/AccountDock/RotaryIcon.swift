@@ -136,7 +136,7 @@ final class RotaryIconView: NSView {
     private func layoutParts() {
         let now = CACurrentMediaTime()
         phase = currentPhase(at: now).truncatingRemainder(dividingBy: 6 * .pi); startedAt = now
-        let side = min(bounds.width, bounds.height)
+        let side: CGFloat = template ? 20 : min(bounds.width, bounds.height)
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
         let eccentricity = side * 12 / (template ? 240 : 264)
         func point(_ angle: Double) -> CGPoint { CGPoint(x: center.x + eccentricity*sin(angle), y: center.y - eccentricity*cos(angle)) }

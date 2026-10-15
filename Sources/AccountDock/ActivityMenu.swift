@@ -247,13 +247,19 @@ final class MenuBarController: NSObject, ObservableObject, NSPopoverDelegate {
             if let layer = button.layer {
                 Self.holdRotation(on: layer)
                 CATransaction.begin(); CATransaction.setDisableActions(true)
-                layer.transform = CATransform3DIdentity; CATransaction.commit()
+                layer.transform = CATransform3DIdentity; layer.mask = nil; CATransaction.commit()
             }
             if design == .rotary {
-                button.image = nil
-                let view = RotaryIconView(frame: NSRect(x: (button.bounds.width-20)/2, y: (button.bounds.height-20)/2, width: 20, height: 20), template: true)
-                view.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
-                button.addSubview(view); rotaryView = view
+                // Let the native status button supply active/inactive display ink.
+                // Only its alpha mask moves, so replica tint remains owned by AppKit.
+                button.wantsLayer = true
+                let ink = NSImage(size: NSSize(width: 14, height: 20), flipped: false) { rect in
+                    NSColor.black.setFill(); rect.fill(); return true
+                }
+                ink.isTemplate = true; button.image = ink
+                let view = RotaryIconView(frame: button.bounds, template: true)
+                button.layer?.mask = view.layer
+                rotaryView = view
             } else {
                 let image = WheelIcon.menuImage(size: 20, color: .black, design: design)
                 image.isTemplate = true; button.image = image
