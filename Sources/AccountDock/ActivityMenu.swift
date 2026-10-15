@@ -487,16 +487,10 @@ struct ActivityMenu: View {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack { Text(preset.displayName).fontWeight(.semibold); Spacer(); Text(preset.planLabel).foregroundStyle(Color(nsColor: .secondaryLabelColor)) }
                             if let id = accountID(preset) {
-                                let count = monitor.snapshot.activeAccounts[id, default: 0]
-                                HStack(spacing: 6) {
-                                    Circle().fill(count > 0 ? DockTheme.orange : Color(nsColor: .secondaryLabelColor).opacity(0.4)).frame(width: 6, height: 6)
-                                    Text(count > 0 ? "작업 중 · 대화 \(count)개" : (monitor.snapshot.observedAccounts.contains(id) ? "대기 중" : "활동 기록 없음"))
-                                        .foregroundStyle(count > 0 ? Color.primary : Color(nsColor: .secondaryLabelColor))
-                                        .fontWeight(count > 0 ? .medium : .regular)
-                                }
-                                ForEach(visibleSnapshot.activeConversations.filter { $0.account == id }.sorted { $0.id < $1.id }) { conversation in
-                                    ActivityConversationRow(conversation: conversation)
-                                }
+                                ActivityConversations(
+                                    count: monitor.snapshot.activeAccounts[id, default: 0],
+                                    observed: monitor.snapshot.observedAccounts.contains(id),
+                                    conversations: visibleSnapshot.activeConversations.filter { $0.account == id }.sorted { $0.id < $1.id })
                             }
                             if let id = accountID(preset) {
                                 if visibleSnapshot.days.values.contains(where: { $0[id] != nil }) {
@@ -557,6 +551,43 @@ struct ActivityMenu: View {
             Text(value.formatted()).font(.system(size: 17, weight: .semibold, design: .rounded)).monospacedDigit().minimumScaleFactor(0.6).lineLimit(1)
         }.frame(maxWidth: .infinity, alignment: .leading).padding(9)
             .background(DockTheme.blue.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+struct ActivityConversations: View {
+    let count: Int
+    let observed: Bool
+    let conversations: [ActiveConversation]
+    @State private var expanded = false
+    private var status: String { count > 0 ? "작업 중 · 대화 \(count)개" : (observed ? "대기 중" : "활동 기록 없음") }
+    private var statusLabel: some View {
+        HStack(spacing: 6) {
+            Circle().fill(count > 0 ? DockTheme.orange : Color(nsColor: .secondaryLabelColor).opacity(0.4)).frame(width: 6, height: 6)
+            Text(status)
+                .foregroundStyle(count > 0 ? Color.primary : Color(nsColor: .secondaryLabelColor))
+                .fontWeight(count > 0 ? .medium : .regular)
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if count > 1 {
+                Button { expanded.toggle() } label: {
+                    HStack {
+                        statusLabel
+                        Spacer(minLength: 4)
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                    }.contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .accessibilityLabel(status).accessibilityValue(expanded ? "펼쳐짐" : "접힘")
+                    .help(expanded ? "대화 목록 접기" : "대화 목록 펼치기")
+            } else { statusLabel }
+            if count == 1 || expanded {
+                ForEach(conversations) { ActivityConversationRow(conversation: $0) }
+            }
+        }.onChange(of: count) { _, value in
+            if value <= 1 { expanded = false }
+        }
     }
 }
 
