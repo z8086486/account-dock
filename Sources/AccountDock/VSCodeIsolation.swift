@@ -202,11 +202,16 @@ enum VSCodeIsolation {
         result["CODEX_SQLITE_HOME"] = VSCodeEnvironment.originalHome.path
         return result
     }
-    static func launch(_ workspace: Workspace) async throws {
+    static func conversationURL(_ id: String) throws -> String {
+        guard UUID(uuidString: id) != nil else { throw DockError.message("올바른 대화 ID가 아닙니다.") }
+        return "vscode://openai.chatgpt/local/" + id.lowercased()
+    }
+    static func launch(_ workspace: Workspace, conversationID: String? = nil) async throws {
         let home = workspace.home, userData = workspace.userData
         let task = Process()
         task.executableURL = executable
         task.arguments = ["--user-data-dir", userData.path, "--extensions-dir", FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".vscode/extensions").path, "--new-window", "--skip-welcome", "--skip-release-notes"]
+        if let conversationID { task.arguments! += ["--open-url", try conversationURL(conversationID)] }
         task.environment = launchEnvironment(ProcessInfo.processInfo.environment, home: home)
         task.standardOutput = FileHandle.nullDevice; task.standardError = FileHandle.nullDevice
         try task.run()

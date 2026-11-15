@@ -227,7 +227,7 @@ final class DockModel: ObservableObject {
             }
         } catch { message = error.localizedDescription }
     }
-    func applyToVSCode(_ preset: AccountPreset) async {
+    func applyToVSCode(_ preset: AccountPreset, conversationID: String? = nil) async {
         guard !busy, !refreshingUsage else { return }
         busy = true
         defer { busy = false }
@@ -249,7 +249,7 @@ final class DockModel: ObservableObject {
                     throw DockError.message("실행 중인 계정별 VS Code 창의 인증을 확인하지 못했습니다.")
                 }
                 try VSCodeIsolation.requireMatchingIdentity(before, preset: latest)
-                try await VSCodeIsolation.launch(workspace)
+                try await VSCodeIsolation.launch(workspace, conversationID: conversationID)
                 appAccounts = try await AppIdentityReader.read().accounts
                 message = "\(latest.displayName) 창을 추가로 열었습니다."
                 return
@@ -277,7 +277,7 @@ final class DockModel: ObservableObject {
                 try VSCodeIsolation.validateDirectory(home)
                 try VSCodeIsolation.requireStopped(workspace)
             }
-            do { try await VSCodeIsolation.launch(workspace) }
+            do { try await VSCodeIsolation.launch(workspace, conversationID: conversationID) }
             catch {
                 do {
                     try AuthTransaction.rollback(before, home: home, expected: credential) {
@@ -374,7 +374,7 @@ struct Dashboard: View {
                     }
                     if selection == "accounts" {
                         targets
-                    } else if selection == "updates" { UpdatePanel(center: updates) } else if selection == "access" { SetupPanel(refreshToken: menuRefresh) } else {
+                    } else if selection == "conversations" { ConversationExplorer(model: model) } else if selection == "updates" { UpdatePanel(center: updates) } else if selection == "access" { SetupPanel(refreshToken: menuRefresh) } else {
                         presetSection
                     }
                     footer
@@ -467,6 +467,7 @@ struct Dashboard: View {
                 Text("Account Dock").font(.system(size: 16, weight: .semibold))
             }.padding(.top, 40).padding(.bottom, 42)
             nav("계정 관리", icon: "square.grid.2x2", id: "accounts")
+            nav("대화", icon: "bubble.left.and.bubble.right", id: "conversations")
             nav("저장한 계정", icon: "person.crop.rectangle.stack", id: "presets")
             nav("버전 · 업데이트", icon: "arrow.down.circle", id: "updates")
             nav("설정", icon: "lock.shield", id: "access")
@@ -492,7 +493,7 @@ struct Dashboard: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 9) {
-                Text(selection == "accounts" ? "계정 관리" : selection == "updates" ? "업데이트" : selection == "access" ? "설정" : "저장한 계정")
+                Text(selection == "accounts" ? "계정 관리" : selection == "conversations" ? "대화" : selection == "updates" ? "업데이트" : selection == "access" ? "설정" : "저장한 계정")
                     .font(.system(size: 29, weight: .semibold))
 
             }

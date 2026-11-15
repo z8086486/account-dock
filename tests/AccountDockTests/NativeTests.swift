@@ -273,7 +273,7 @@ final class NativeTests: XCTestCase {
         XCTAssertFalse(VSCodeIsolation.matchesCloseTarget(args: args, environment: ["CODEX_HOME": "/Users/fixture/.codex"], workspace: workspace))
         XCTAssertFalse(VSCodeIsolation.matchesCloseTarget(args: ["--user-data-dir", "/private/tmp/other"], environment: environment, workspace: workspace))
         XCTAssertThrowsError(try VSCodeIsolation.closeWorkspace(for: nil))
-        XCTAssertThrowsError(try VSCodeIsolation.closeWorkspace(for: AccessSetup.home))
+        XCTAssertThrowsError(try VSCodeIsolation.closeWorkspace(for: VSCodeEnvironment.originalHome.path))
         XCTAssertThrowsError(try VSCodeIsolation.closeWorkspace(for: VSCodeIsolation.root.appendingPathComponent("accounts/not-a-key/codex").path))
     }
     @MainActor func testManagedDirectoryRejectsSymlinks() throws {

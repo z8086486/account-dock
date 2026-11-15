@@ -145,3 +145,7 @@ __pycache__/
 # Read-only per-turn runtime settings observation.
 !/Sources/AccountDock/ActivitySettings.swift
 !/tests/AccountDockTests/ActivitySettingsTests.swift
+
+# Read-only local conversation explorer.
+!/Sources/AccountDock/Conversations.swift
+!/tests/AccountDockTests/ConversationTests.swift
