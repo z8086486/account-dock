@@ -4,6 +4,13 @@ import Darwin
 
 /// A bounded, cancellable JSON-RPC connection to the installed official Codex binary.
 /// Credentials travel only over stdin; stderr and unsolicited payloads are never logged.
+struct CodexRPCError: LocalizedError {
+    let code: Int
+    let serverMessage: String
+    var isActiveWriter: Bool { code == -32600 && serverMessage.hasPrefix("thread ") && serverMessage.hasSuffix(" already has an active writer") }
+    var errorDescription: String? { "Codex가 요청을 처리하지 못했습니다." }
+}
+
 @MainActor
 final class CodexConnection {
     private let process = Process()
@@ -18,11 +25,12 @@ final class CodexConnection {
     var notification: ((String, [String: Any]) -> Void)?
     var serverRequest: ((String) -> Void)?
 
-    init(binary: URL, home: URL, ephemeral: Bool = false) throws {
+    init(binary: URL, home: URL, ephemeral: Bool = false, sqliteHome: URL? = nil) throws {
         process.executableURL = binary
         process.arguments = (ephemeral ? ["-c", "cli_auth_credentials_store=\"ephemeral\""] : []) + ["app-server", "--listen", "stdio://"]
         var environment = ProcessInfo.processInfo.environment
         environment["CODEX_HOME"] = home.path
+        if let sqliteHome { environment["CODEX_SQLITE_HOME"] = sqliteHome.path }
         environment.removeValue(forKey: "OPENAI_API_KEY")
         environment.removeValue(forKey: "CODEX_ACCESS_TOKEN")
         process.environment = environment
@@ -80,7 +88,7 @@ final class CodexConnection {
                 if message["id"] != nil { serverRequest?(method) }
                 else { notification?(method, message["params"] as? [String: Any] ?? [:]) }
             } else if let id = message["id"] as? Int {
-                if message["error"] != nil { resolve(id, .failure(DockError.message("Codex가 요청을 처리하지 못했습니다."))) }
+                if let error = message["error"] as? [String: Any] { resolve(id, .failure(CodexRPCError(code: error["code"] as? Int ?? -1, serverMessage: error["message"] as? String ?? ""))) }
                 else {
                     do { resolve(id, .success(try JSONSerialization.data(withJSONObject: message["result"] as? [String: Any] ?? [:]))) }
                     catch { resolve(id, .failure(error)) }

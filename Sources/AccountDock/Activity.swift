@@ -5,6 +5,7 @@ import Darwin
 struct LocalLimitSample: Sendable, Codable {
     let data: Data
     let date: Date
+    var account: String? = nil
 }
 
 /// Execution metadata only. Conversation text and tool output are never retained.
@@ -143,6 +144,7 @@ struct ActivityLogState: Sendable, Codable {
     var replayUntil: UInt64?
     var turnContext: ActivityTurnContext?
     var activeTurnID: String?
+    var lastFinishedTurnID: String?
 
     mutating func observeOwner(_ owner: String?, at offset: UInt64) {
         if owner != attributedAccount {
@@ -168,12 +170,13 @@ struct ActivityLogState: Sendable, Codable {
         if let date { latest = max(latest, date) }
         if type == "token_count", let date, let rates = payload["rate_limits"] as? [String: Any],
            let data = try? JSONSerialization.data(withJSONObject: rates), date >= (limit?.date ?? .distantPast) {
-            limit = LocalLimitSample(data: data, date: date)
+            let owner = (attributionStart.map { position >= $0 } ?? false) ? (attributedAccount ?? account) : account
+            limit = LocalLimitSample(data: data, date: date, account: owner)
         }
         let turn = payload["turn_id"] as? String ?? "legacy"
         if type == "task_started" { turns.insert(turn); activeTurnID = turn }
         if ["task_complete", "turn_aborted", "task_failed"].contains(type) {
-            turns.remove(turn); if let date { lastFinish = max(lastFinish, date) }
+            turns.remove(turn); if let date, date >= lastFinish { lastFinish = date; lastFinishedTurnID = turn }
             if activeTurnID == turn { activeTurnID = nil }
             if turnContext?.turnID == turn { turnContext = nil }
         }
@@ -256,7 +259,9 @@ actor ActivityScanner {
     private var lastScan = Date.distantPast
     private var root: URL
     private let managed: URL
-    init(root: URL, managed: URL, cacheURL: URL? = nil) {
+    private let ownership: @Sendable () -> [URL: String]
+    init(root: URL, managed: URL, cacheURL: URL? = nil, ownership: @escaping @Sendable () -> [URL: String] = { ActivityOwnership.read() }) {
+        self.ownership = ownership
         self.root = root; self.managed = managed; self.cacheURL = cacheURL
         if let cacheURL, let attrs = try? FileManager.default.attributesOfItem(atPath: cacheURL.path),
            (attrs[.size] as? NSNumber)?.intValue ?? Int.max < 20_000_000,
@@ -302,9 +307,12 @@ actor ActivityScanner {
             requestSettings = requestSettings.filter { paths.contains($0.key) }
             lastScan = now
         }
-        let owners = ActivityOwnership.read().filter { url, _ in
+        let owners = ownership().filter { url, _ in
             watchedFolders.contains { url.path.hasPrefix($0.path + "/") }
         }
+        let historyHome = fm.fileExists(atPath: root.appendingPathComponent("thread_history_1.sqlite").path)
+            ? root : root.appendingPathComponent("sessions").resolvingSymlinksInPath().deletingLastPathComponent()
+        let observedTurns = ActivityTurnsReader.read(home: historyHome, threadIDs: Set(owners.keys.map { String($0.deletingPathExtension().lastPathComponent.suffix(36)) }))
         discovered = Array(Set(discovered).union(owners.keys))
         var snapshot = ActivitySnapshot(indexing: false)
         var budget = 8 * 1024 * 1024
@@ -328,7 +336,7 @@ actor ActivityScanner {
                     let handle = try FileHandle(forReadingFrom: url)
                     defer { try? handle.close() }
                     try handle.seek(toOffset: state.offset)
-                    let data = try handle.read(upToCount: min(budget, 8 * 1024 * 1024)) ?? Data()
+                    let data = try handle.read(upToCount: min(budget, 8 * 1024 * 1024, Int(size - state.offset))) ?? Data()
                     state.offset += UInt64(data.count); budget -= data.count
                     if !data.isEmpty { cacheDirty = true }
                     state.append(data)
@@ -337,7 +345,9 @@ actor ActivityScanner {
             snapshot.indexing = snapshot.indexing || state.offset < size
             files[url] = state
             // Fast lane: current activity never waits for the historical index.
-            if now.timeIntervalSince(modified) < 300 {
+            let threadID = String(url.deletingPathExtension().lastPathComponent.suffix(36))
+            let observedTurn = observedTurns[threadID]
+            if now.timeIntervalSince(modified) < 300 || observedTurn?.active == true {
                 var recent = live[url] ?? ActivityLogState()
                 recent.liveOnly = true
                 if recent.fileNumber != number || recent.offset > size {
@@ -347,33 +357,40 @@ actor ActivityScanner {
                     recent.offset = size > 524_288 ? size - 524_288 : 0
                     recent.oversizedLine = recent.offset > 0 // discard partial first line
                 }
+                if size > recent.offset && size - recent.offset > 524_288 {
+                    recent.offset = size - 524_288
+                    recent.pending = Data(); recent.oversizedLine = true
+                }
                 recent.fileNumber = number
                 recent.account = owners[url] ?? state.account
                 if size > recent.offset, let handle = try? FileHandle(forReadingFrom: url) {
                     defer { try? handle.close() }
                     try? handle.seek(toOffset: recent.offset)
-                    if let data = try? handle.read(upToCount: 524_288) {
+                    if let data = try? handle.read(upToCount: Int(min(524_288, size - recent.offset))) {
                         recent.offset += UInt64(data.count); recent.append(data)
                     }
                 }
-                if let owner = owners[url] { recent.account = owner }
+                if let owner = owners[url] {
+                    recent.account = owner
+                    if var limit = recent.limit, let observedTurn, observedTurn.active, limit.date >= observedTurn.started {
+                        limit.account = owner; recent.limit = limit
+                    }
+                }
                 live[url] = recent
                 // Missing starts in a tail are covered by fresh token events; terminal events win.
-                let active = (!recent.turns.isEmpty && now.timeIntervalSince(recent.latest) < 180)
-                    || (recent.lastWork > recent.lastFinish && now.timeIntervalSince(recent.lastWork) < 15)
-                if active && recent.offset == size {
+                let active = ActivityTurnsReader.active(recent: recent, full: state.offset == size ? state : nil, observed: observedTurn, now: now)
+                if active && (recent.offset == size || observedTurn?.active == true) {
                     snapshot.active = true
                     snapshot.activeAccounts[recent.account, default: 0] += 1
                     // A historical context must not be mistaken for a different live turn.
-                    let turn = recent.activeTurnID ?? (state.offset == size ? state.activeTurnID : nil)
+                    let turn = (observedTurn?.active == true ? observedTurn?.id : nil) ?? recent.activeTurnID ?? (state.offset == size ? state.activeTurnID : nil)
                     let context = recent.turnContext ?? (turn != nil && state.turnContext?.turnID == turn ? state.turnContext : nil)
-                    let threadID = String(url.deletingPathExtension().lastPathComponent.suffix(36))
                     var sample = requestSettings[url]
                     if sample?.turn != turn || sample == nil ||
                         ((turn == nil || sample?.value?.serviceTier == nil) && now.timeIntervalSince(sample!.checkedAt) >= 5) {
                         let value: ObservedActivitySettings?
-                        if let turn { value = ActivitySettingsReader.settings(home: root, threadID: threadID, turnID: turn) }
-                        else { value = ActivitySettingsReader.latestSettings(home: root, threadID: threadID,
+                        if let turn { value = ActivitySettingsReader.settings(home: historyHome, threadID: threadID, turnID: turn) }
+                        else { value = ActivitySettingsReader.latestSettings(home: historyHome, threadID: threadID,
                             since: max(now.addingTimeInterval(-180), recent.lastFinish)) }
                         sample = SettingsSample(turn: turn, checkedAt: now, value: value)
                         requestSettings[url] = sample
@@ -387,8 +404,11 @@ actor ActivityScanner {
                         serviceTier: sample?.value?.serviceTier ?? (current ? context?.serviceTier : nil),
                         project: current ? context?.project : nil))
                 } else { requestSettings[url] = nil }
-                if let limit = recent.limit, limit.date > (snapshot.limits[recent.account]?.date ?? .distantPast) {
-                    snapshot.limits[recent.account] = limit
+                if let limit = recent.limit {
+                    let account = limit.account ?? recent.account
+                    if (owners[url] == nil || owners[url] == account), limit.date > (snapshot.limits[account]?.date ?? .distantPast) {
+                        snapshot.limits[account] = limit
+                    }
                 }
             }
             if state.account != ActivitySnapshot.unknown { snapshot.observedAccounts.insert(state.account) }
@@ -396,8 +416,11 @@ actor ActivityScanner {
             for accounts in state.days.values {
                 snapshot.observedAccounts.formUnion(accounts.keys.filter { $0 != ActivitySnapshot.unknown })
             }
-            if let limit = state.limit, limit.date > (snapshot.limits[state.account]?.date ?? .distantPast) {
-                snapshot.limits[state.account] = limit
+            if let limit = state.limit {
+                let account = limit.account ?? state.account
+                if (owners[url] == nil || owners[url] == account), limit.date > (snapshot.limits[account]?.date ?? .distantPast) {
+                    snapshot.limits[account] = limit
+                }
             }
             for (day, accounts) in state.costs ?? [:] {
                 for (account, cost) in accounts { snapshot.costs[day, default: [:]][account, default: TokenCost()].add(cost) }

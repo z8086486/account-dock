@@ -59,7 +59,16 @@ final class DockModel: ObservableObject {
     @Published var report: AccountReport?
     @Published var presets: [AccountPreset] = []
     @Published var busy = false
-    @Published var message: String?
+    private var messageDismissal: Task<Void, Never>?
+    @Published var message: String? { didSet { messageDismissal?.cancel() } }
+    private func showNotice(_ text: String) {
+        message = text
+        messageDismissal = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(6)) } catch { return }
+            guard let self, !self.busy, !self.waitingForKeychain, !self.canCancelLogin else { return }
+            self.message = nil
+        }
+    }
     @Published var lastChecked: Date?
     @Published var activeAccountID: String?
     @Published var usage: [String: UsageReport] = [:]
@@ -227,7 +236,7 @@ final class DockModel: ObservableObject {
             }
         } catch { message = error.localizedDescription }
     }
-    func applyToVSCode(_ preset: AccountPreset, conversationID: String? = nil) async {
+    func applyToVSCode(_ preset: AccountPreset, conversationID: String? = nil, sideChat: SideChatRequest? = nil) async {
         guard !busy, !refreshingUsage else { return }
         busy = true
         defer { busy = false }
@@ -249,9 +258,9 @@ final class DockModel: ObservableObject {
                     throw DockError.message("실행 중인 계정별 VS Code 창의 인증을 확인하지 못했습니다.")
                 }
                 try VSCodeIsolation.requireMatchingIdentity(before, preset: latest)
-                try await VSCodeIsolation.launch(workspace, conversationID: conversationID)
+                try await openConversation(workspace, conversationID: conversationID, sideChat: sideChat)
                 appAccounts = try await AppIdentityReader.read().accounts
-                message = "\(latest.displayName) 창을 추가로 열었습니다."
+                showNotice("\(latest.displayName) 창을 추가로 열었습니다.")
                 return
             }
             try VSCodeIsolation.requireStopped(workspace)
@@ -277,8 +286,9 @@ final class DockModel: ObservableObject {
                 try VSCodeIsolation.validateDirectory(home)
                 try VSCodeIsolation.requireStopped(workspace)
             }
-            do { try await VSCodeIsolation.launch(workspace, conversationID: conversationID) }
+            do { try await openConversation(workspace, conversationID: conversationID, sideChat: sideChat) }
             catch {
+                let launchError = error
                 do {
                     try AuthTransaction.rollback(before, home: home, expected: credential) {
                         try VSCodeIsolation.validateDirectory(home)
@@ -287,11 +297,32 @@ final class DockModel: ObservableObject {
                 } catch {
                     throw DockError.message("계정별 VS Code 창의 실행 상태가 불확실해 인증을 복구하지 않았습니다. 해당 창을 확인하세요.")
                 }
-                throw DockError.message("계정별 VS Code 창을 열지 못해 이전 인증으로 복구했습니다.")
+                throw DockError.message("\(launchError.localizedDescription) 이전 인증으로 복구했습니다.")
             }
             appAccounts = try await AppIdentityReader.read().accounts
-            message = "\(latest.displayName) 계정별 VS Code 창을 열었습니다."
+            showNotice("\(latest.displayName) 계정별 VS Code 창을 열었습니다.")
         } catch { message = error.localizedDescription }
+    }
+    func deleteConversation(_ id: String) async -> Bool {
+        guard !busy, !refreshingUsage else { return false }
+        busy = true
+        defer { busy = false }
+        message = "대화를 삭제하고 있습니다."
+        do {
+            try await ConversationDeletion.delete(id)
+            showNotice("대화를 삭제했습니다.")
+            return true
+        } catch { message = error.localizedDescription; return false }
+    }
+    private func openConversation(_ workspace: VSCodeIsolation.Workspace, conversationID: String?, sideChat: SideChatRequest?) async throws {
+        let id: String?
+        if let sideChat { id = try await SideChatService.create(sideChat, home: workspace.home) }
+        else { id = conversationID }
+        do { try await VSCodeIsolation.launch(workspace, conversationID: id) }
+        catch {
+            if sideChat != nil { throw DockError.message("사이드 채팅은 저장됐지만 새 창을 열지 못했습니다. 대화 목록에서 다시 열어 주세요.") }
+            throw error
+        }
     }
     func registerCurrentAccount() async {
         activeAccountID = nil
@@ -306,6 +337,18 @@ final class DockModel: ObservableObject {
         } catch { message = "현재 계정을 자동 등록하지 못했습니다. 설정 화면에서 Keychain 접근을 확인해 주세요." }
     }
     private var lastUsageAttempt = Date.distantPast
+    private var localLimitDates: [String: Date] = [:]
+    func ingestLocalUsage(_ samples: [String: LocalLimitSample]) {
+        guard UserDefaults.standard.object(forKey: "accountDock.usageEnabled") as? Bool ?? true else { return }
+        for preset in presets {
+            guard let json = (try? JSONSerialization.jsonObject(with: preset.credential)) as? [String: Any],
+                  let account = (json["tokens"] as? [String: Any])?["account_id"] as? String,
+                  let sample = samples[account], sample.date > (localLimitDates[preset.id] ?? .distantPast),
+                  let report = LocalUsageReport.normalize(sample) else { continue }
+            localLimitDates[preset.id] = sample.date
+            usage[preset.id] = UsageReport.merging(report, previous: usage[preset.id])
+        }
+    }
     func refreshUsage(allowWhileAdding: Bool = false, minimumInterval: TimeInterval = 0, skippingAccounts: Set<String> = []) async {
         guard Date().timeIntervalSince(lastUsageAttempt) >= minimumInterval else { return }
         guard !refreshingUsage, (!busy || (allowWhileAdding && addingAccount)) else { return }
@@ -323,7 +366,7 @@ final class DockModel: ObservableObject {
             guard UserDefaults.standard.object(forKey: "accountDock.usageEnabled") as? Bool ?? true else {
                 usage = [:]; return
             }
-            if presets.contains(where: { $0.id == id }) { usage[id] = report }
+            if presets.contains(where: { $0.id == id }) { usage[id] = UsageReport.merging(report, previous: usage[id]) }
             usageLoading.remove(id)
         }
     }
@@ -498,10 +541,12 @@ struct Dashboard: View {
 
             }
             Spacer()
-            Button { Task { await model.request(); await updates.refresh(); await model.refreshUsage() } } label: {
-                Label(model.busy ? "확인 중" : "새로고침", systemImage: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .medium)).padding(.horizontal, 4).padding(.vertical, 3)
-            }.buttonStyle(DockButtonStyle()).disabled(model.busy)
+            if selection != "conversations" {
+                Button { Task { await model.request(); await updates.refresh(); await model.refreshUsage() } } label: {
+                    Label(model.busy ? "확인 중" : "새로고침", systemImage: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .medium)).padding(.horizontal, 4).padding(.vertical, 3)
+                }.buttonStyle(DockButtonStyle()).disabled(model.busy)
+            }
         }
     }
     private var targets: some View {

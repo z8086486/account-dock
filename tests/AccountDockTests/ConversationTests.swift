@@ -57,3 +57,94 @@ final class ConversationTests: XCTestCase {
         catch { XCTAssertFalse(FileManager.default.fileExists(atPath: home.path)) }
     }
 }
+
+extension ConversationTests {
+    func testSideChatSelectionValidation() throws {
+        let id = UUID().uuidString
+        XCTAssertNoThrow(try SideChatRequest(parentID: id, quote: "선택한 문장").validate())
+        XCTAssertThrowsError(try SideChatRequest(parentID: "invalid", quote: "text").validate())
+        XCTAssertThrowsError(try SideChatRequest(parentID: id, quote: " \n").validate())
+        XCTAssertThrowsError(try SideChatRequest(parentID: id, quote: String(repeating: "가", count: 22000)).validate())
+    }
+}
+
+
+extension ConversationTests {
+    @MainActor func testNativeAttachedForkKeepsSelectedContextAcrossRestart() async throws {
+        guard ProcessInfo.processInfo.environment["ACCOUNT_DOCK_CODEX_INTEGRATION"] == "1" else { throw XCTSkip("Requires installed Codex; opt-in isolated integration test") }
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("accountdock-side-test-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let connection = try CodexConnection(binary: CodexService.binary(), home: home, sqliteHome: home)
+        try await connection.initialize()
+        let start = try await connection.request("thread/start", params: ["historyMode": "paginated", "threadSource": "user", "cwd": home.path])
+        let parent = try XCTUnwrap((start["thread"] as? [String: Any])?["id"] as? String)
+        _ = try await connection.request("thread/inject_items", params: ["threadId": parent, "items": [["type": "message", "role": "user", "content": [["type": "input_text", "text": "Synthetic parent context"]]]]])
+        do {
+            try await ConversationDeletion.delete(parent, storageHome: home, linksURL: home.appendingPathComponent("links.json"))
+            XCTFail("Must not delete a thread owned by a live writer")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("다른 창")) }
+        let managedHome = home.appendingPathComponent("managed-account")
+        try FileManager.default.createDirectory(at: managedHome, withIntermediateDirectories: true)
+        for folder in ["sessions", "archived_sessions"] {
+            try FileManager.default.createSymbolicLink(at: managedHome.appendingPathComponent(folder), withDestinationURL: home.appendingPathComponent(folder))
+        }
+        let liveRequest = SideChatRequest(parentID: parent, quote: "열린 원본의 선택 내용")
+        let liveChild = try await SideChatService.create(liveRequest, home: managedHome, storageHome: home, linksURL: home.appendingPathComponent("links.json"))
+        let liveRows = try await ConversationReader(home: home, linksURL: home.appendingPathComponent("links.json")).conversations()
+        XCTAssertEqual(liveRows.first(where: { $0.id == liveChild })?.parentID, parent)
+        // Source writer remains responsive after the fallback fork.
+        _ = try await connection.request("thread/read", params: ["threadId": parent, "includeTurns": false])
+        await connection.shutdown()
+        let request = SideChatRequest(parentID: parent, quote: "선택한 문장 — 계정 독립 테스트")
+        let child = try await SideChatService.create(request, home: home, storageHome: home, linksURL: home.appendingPathComponent("links.json"))
+        let rows = try await ConversationReader(home: home).conversations()
+        XCTAssertEqual(rows.first(where: { $0.id == child })?.parentID, parent)
+        XCTAssertEqual(rows.first(where: { $0.id == child })?.title, request.title)
+        let reopened = try CodexConnection(binary: CodexService.binary(), home: home, sqliteHome: home)
+        try await reopened.initialize()
+        let read = try await reopened.request("thread/read", params: ["threadId": child, "includeTurns": false])
+        let thread = try XCTUnwrap(read["thread"] as? [String: Any])
+        XCTAssertEqual(thread["attachedToThreadId"] as? String, parent)
+        XCTAssertEqual(thread["forkedFromId"] as? String, parent)
+        XCTAssertEqual(thread["historyMode"] as? String, "paginated")
+        let path = try XCTUnwrap(thread["path"] as? String)
+        let stored = try String(contentsOfFile: path, encoding: .utf8)
+        XCTAssertTrue(stored.contains(request.quote))
+        let parentRead = try await reopened.request("thread/read", params: ["threadId": parent, "includeTurns": false])
+        let parentPath = try XCTUnwrap((parentRead["thread"] as? [String: Any])?["path"] as? String)
+        let parentContent = try String(contentsOfFile: parentPath, encoding: .utf8)
+        XCTAssertTrue(parentContent.contains("Synthetic parent context"))
+        XCTAssertFalse(parentContent.contains(request.quote))
+        await reopened.shutdown()
+        do {
+            try await ConversationDeletion.delete(parent, storageHome: home, linksURL: home.appendingPathComponent("links.json"))
+            XCTFail("Must preserve parent while side chats exist")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("하위")) }
+        try await ConversationDeletion.delete(child, storageHome: home, linksURL: home.appendingPathComponent("links.json"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path))
+        let afterOneDeletion = try await ConversationReader(home: home, linksURL: home.appendingPathComponent("links.json")).conversations()
+        XCTAssertEqual(Set(afterOneDeletion.map(\.id)), Set([parent, liveChild]))
+        try await ConversationDeletion.delete(liveChild, storageHome: home, linksURL: home.appendingPathComponent("links.json"))
+        XCTAssertTrue(try SideChatLinks.read(at: home.appendingPathComponent("links.json")).isEmpty)
+        try await ConversationDeletion.delete(parent, storageHome: home, linksURL: home.appendingPathComponent("links.json"))
+        let remaining = try await ConversationReader(home: home, linksURL: home.appendingPathComponent("links.json")).conversations()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+}
+
+
+extension ConversationTests {
+    func testWriterFailureClassificationAndLinkPersistence() throws {
+        XCTAssertTrue(CodexRPCError(code: -32600, serverMessage: "thread example already has an active writer").isActiveWriter)
+        XCTAssertFalse(CodexRPCError(code: -32600, serverMessage: "unknown method").isActiveWriter)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("links.json")
+        let parent = UUID().uuidString, child = UUID().uuidString
+        try SideChatLinks.record(child: child, parent: parent, at: path)
+        XCTAssertEqual(try SideChatLinks.read(at: path)[child], parent)
+        XCTAssertThrowsError(try SideChatLinks.record(child: parent, parent: parent, at: path))
+        XCTAssertEqual(try SideChatLinks.read(at: path).count, 1)
+    }
+}

@@ -149,3 +149,18 @@ __pycache__/
 # Read-only local conversation explorer.
 !/Sources/AccountDock/Conversations.swift
 !/tests/AccountDockTests/ConversationTests.swift
+
+# Local Markdown transcript and attached side chat support.
+!/Sources/AccountDock/ConversationTranscript.swift
+!/Sources/AccountDock/SideChat.swift
+!/Sources/AccountDock/Resources/Transcript/
+!/licenses/markdown-it-LICENSE.txt
+
+!/tests/AccountDockTests/TranscriptTests.swift
+
+!/licenses/markdown-it-dependencies.txt
+
+!/tests/AccountDockTests/UsageMergeTests.swift
+
+!/Sources/AccountDock/ActivityTurns.swift
+!/tests/AccountDockTests/ActivityTurnsTests.swift

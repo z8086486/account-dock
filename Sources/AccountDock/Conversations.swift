@@ -18,7 +18,8 @@ struct ConversationMessage: Identifiable, Sendable {
 /// Never opens authentication files or writes to Codex databases.
 actor ConversationReader {
     let home: URL
-    init(home: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")) { self.home = home }
+    let linksURL: URL
+    init(home: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex"), linksURL: URL = SideChatLinks.url) { self.home = home; self.linksURL = linksURL }
     private func query(_ file: String, sql: String, values: [String] = []) throws -> [[String]] {
         let path = home.appendingPathComponent(file)
         guard FileManager.default.fileExists(atPath: path.path) else { throw DockError.message("로컬 대화 저장소를 찾지 못했습니다.") }
@@ -48,15 +49,23 @@ actor ConversationReader {
         return rows
     }
     func conversations() throws -> [LocalConversation] {
-        try query("state_5.sqlite", sql: """
+        let links = try SideChatLinks.read(at: linksURL)
+        return try query("state_5.sqlite", sql: """
             SELECT id, attached_thread_parent_id, COALESCE(NULLIF(name,''),NULLIF(title,''),'제목 없는 대화'), updated_at, archived
             FROM threads WHERE (thread_source = 'user' OR (thread_source IS NULL AND source IN ('vscode','cli','exec')))
             ORDER BY updated_at DESC LIMIT 5000
             """).compactMap { row in
                 guard UUID(uuidString: row[0]) != nil else { return nil }
-                return LocalConversation(id: row[0], parentID: row[1].isEmpty ? nil : row[1],
+                return LocalConversation(id: row[0], parentID: row[1].isEmpty ? links[row[0]] : row[1],
                     title: String(row[2].prefix(300)), updated: Date(timeIntervalSince1970: Double(row[3]) ?? 0), archived: row[4] == "1")
             }
+    }
+    func hasChildren(threadID: String) throws -> Bool {
+        if !(try query("state_5.sqlite", sql: "SELECT id FROM threads WHERE attached_thread_parent_id = ? LIMIT 1", values: [threadID])).isEmpty { return true }
+        for (child, parent) in try SideChatLinks.read(at: linksURL) where parent == threadID {
+            if !(try query("state_5.sqlite", sql: "SELECT id FROM threads WHERE id = ? LIMIT 1", values: [child])).isEmpty { return true }
+        }
+        return false
     }
     func messages(threadID: String, before: Int64? = nil) throws -> (messages: [ConversationMessage], cursor: Int64?) {
         guard UUID(uuidString: threadID) != nil else { throw DockError.message("올바른 대화 ID가 아닙니다.") }
@@ -95,13 +104,22 @@ struct ConversationExplorer: View {
     @State private var error: String?
     @State private var loading = false
     @State private var expanded: Set<String> = []
+    @State private var selectedQuote: String?
+    @State private var sideParent: String?
+    @State private var showSideChat = false
+    @State private var pendingDeletion: LocalConversation?
+    @State private var showDeletion = false
     private var current: LocalConversation? { conversations.first { $0.id == selected } }
     private var roots: [LocalConversation] {
         let ids = Set(conversations.map(\.id))
-        return conversations.filter { item in
-            (item.parentID == nil || !ids.contains(item.parentID!)) &&
-            (search.isEmpty || item.title.localizedCaseInsensitiveContains(search) || conversations.contains { $0.parentID == item.id && $0.title.localizedCaseInsensitiveContains(search) })
+        var matches = Set(conversations.filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) }.map(\.id))
+        let parents = Dictionary(uniqueKeysWithValues: conversations.compactMap { item in item.parentID.map { (item.id, $0) } })
+        for id in Array(matches) {
+            var next = parents[id]
+            var seen: Set<String> = [id]
+            while let parent = next, seen.insert(parent).inserted { matches.insert(parent); next = parents[parent] }
         }
+        return conversations.filter { ($0.parentID == nil || !ids.contains($0.parentID!)) && matches.contains($0.id) }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -113,26 +131,21 @@ struct ConversationExplorer: View {
             HStack(alignment: .top, spacing: 16) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 4) {
-                        ForEach(roots) { root in
-                            let children = conversations.filter { $0.parentID == root.id }
-                            HStack(spacing: 4) {
-                                if !children.isEmpty {
-                                    Button { if expanded.contains(root.id) { expanded.remove(root.id) } else { expanded.insert(root.id) } } label: {
-                                        Image(systemName: expanded.contains(root.id) || !search.isEmpty ? "chevron.down" : "chevron.right").frame(width: 16)
-                                    }.buttonStyle(.plain).accessibilityLabel("사이드 채팅 펼치기 또는 접기")
-                                }
-                                row(root, side: false)
-                            }
-                            if expanded.contains(root.id) || !search.isEmpty {
-                                ForEach(children) { child in row(child, side: true).padding(.leading, 22) }
-                            }
-                        }
+                        ForEach(roots) { root in treeRow(root, ancestors: []) }
                     }
                 }.frame(width: 240)
                 Divider()
                 VStack(alignment: .leading, spacing: 12) {
                     if let current {
-                        Text(current.title).font(.headline).lineLimit(3)
+                        HStack(alignment: .top) {
+                            Text(current.title).font(.headline).lineLimit(3)
+                            Spacer()
+                            Button { pendingDeletion = current; showDeletion = true } label: {
+                                Image(systemName: "trash")
+                            }.buttonStyle(.borderless).foregroundStyle(.secondary)
+                                .help("이 대화 완전 삭제").accessibilityLabel("이 대화 완전 삭제")
+                                .disabled(model.busy || model.refreshingUsage)
+                        }
                         HStack {
                             Picker("실행 계정", selection: $account) {
                                 Text("계정 선택").tag("")
@@ -144,32 +157,90 @@ struct ConversationExplorer: View {
                                 }
                             }.disabled(account.isEmpty || model.busy || model.refreshingUsage)
                         }
-                        Text("읽기 전용 미리보기 · 대화는 선택한 계정의 VS Code에서 이어갑니다. 같은 대화의 동시 작업은 피하세요.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 16) {
-                                if cursor != nil { Button("이전 메시지 보기") { Task { await load(older: true) } }.disabled(loading) }
-                                ForEach(messages) { item in
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text(item.role == "userMessage" ? "나" : "Codex").font(.caption.bold()).foregroundStyle(.secondary)
-                                        Text(item.text).textSelection(.enabled).font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-                                    }.padding(12).background(.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
-                                }
-                                if loading { ProgressView() }
-                                if !loading && messages.isEmpty { Text("표시할 메시지가 없습니다.").foregroundStyle(.secondary) }
-                            }
+                        HStack {
+                            Text("대화 기록").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            if cursor != nil { Button("이전 메시지 보기") { Task { await load(older: true) } }.disabled(loading) }
+                            if loading { ProgressView().controlSize(.small) }
+                        }
+                        ConversationTranscript(messages: messages) { quote in
+                            selectedQuote = quote
+                            sideParent = current.id
+                            showSideChat = true
                         }.id(current.id)
+                            .background(.white.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
                     } else { ContentUnavailableView("대화를 선택하세요", systemImage: "bubble.left.and.bubble.right") }
                 }.frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(height: 560)
+            }.frame(height: 620)
         }.task { await reload() }.task(id: selected) { await load() }
+        .alert("대화를 완전히 삭제할까요?", isPresented: $showDeletion) {
+            Button("취소", role: .cancel) { pendingDeletion = nil }
+            Button("완전 삭제", role: .destructive) {
+                guard let item = pendingDeletion else { return }
+                Task {
+                    if await model.deleteConversation(item.id) {
+                        if selected == item.id { selected = nil; messages = []; cursor = nil }
+                        expanded.remove(item.id)
+                    }
+                    pendingDeletion = nil
+                    await reload()
+                }
+            }
+        } message: {
+            Text("‘\(pendingDeletion?.title ?? "")’의 이 Mac에 저장된 대화 기록을 삭제합니다. 복구할 수 없습니다. 하위 대화는 먼저 개별 삭제해야 합니다.")
+        }
+        .sheet(isPresented: $showSideChat) {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("사이드 채팅에 질문하기").font(.title2.bold())
+                ScrollView { Text(selectedQuote ?? "").font(.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(14) }
+                    .frame(maxHeight: 180).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                Picker("실행 계정", selection: $account) {
+                    Text("계정 선택").tag("")
+                    ForEach(model.presets) { Text($0.displayName).tag($0.id) }
+                }
+                Text("선택한 내용과 원본 대화의 문맥을 이어받습니다. 질문은 새 VS Code 창에서 입력하세요.")
+                    .font(.callout).foregroundStyle(.secondary)
+                HStack {
+                    Spacer()
+                    Button("취소") { showSideChat = false }.keyboardShortcut(.cancelAction)
+                    Button("사이드 채팅 열기") {
+                        guard let parent = sideParent, let quote = selectedQuote,
+                              let preset = model.presets.first(where: { $0.id == account }) else { return }
+                        showSideChat = false
+                        Task {
+                            await model.applyToVSCode(preset, sideChat: SideChatRequest(parentID: parent, quote: quote))
+                            expanded.insert(parent)
+                            await reload()
+                        }
+                    }.buttonStyle(.borderedProminent).disabled(account.isEmpty || model.busy || model.refreshingUsage)
+                }
+            }.padding(24).frame(width: 520)
+        }
+    }
+    private func treeRow(_ item: LocalConversation, ancestors: Set<String>) -> AnyView {
+        let children = conversations.filter { $0.parentID == item.id && !ancestors.contains($0.id) && $0.id != item.id }
+        let open = expanded.contains(item.id) || !search.isEmpty
+        return AnyView(VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 2) {
+                if !children.isEmpty {
+                    Button { if open { expanded.remove(item.id) } else { expanded.insert(item.id) } } label: {
+                        Image(systemName: open ? "chevron.down" : "chevron.right").font(.caption).frame(width: 16)
+                    }.buttonStyle(.plain).accessibilityLabel("사이드 채팅 펼치기 또는 접기")
+                }
+                row(item, side: !ancestors.isEmpty)
+            }
+            if open && ancestors.count < 20 {
+                ForEach(children) { child in treeRow(child, ancestors: ancestors.union([item.id])).padding(.leading, 14) }
+            }
+        })
     }
     private func row(_ item: LocalConversation, side: Bool) -> some View {
         Button { selected = item.id } label: {
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.title).font(.system(size: 12, weight: .medium)).lineLimit(2)
+                Text(item.title).font(.system(size: 13, weight: .medium)).lineLimit(2)
                 Text((side ? "사이드 채팅 · " : "") + (item.archived ? "보관됨 · " : "") + item.updated.formatted(date: .abbreviated, time: .omitted))
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
                 .background(selected == item.id ? DockTheme.blue.opacity(0.35) : .clear, in: RoundedRectangle(cornerRadius: 8))
                 .contentShape(Rectangle())
