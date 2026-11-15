@@ -47,6 +47,9 @@ final class ConversationTests: XCTestCase {
         let id = UUID().uuidString
         XCTAssertEqual(try VSCodeIsolation.conversationURL(id), "vscode://openai.chatgpt/local/" + id.lowercased() + "?windowId=_blank")
         XCTAssertThrowsError(try VSCodeIsolation.conversationURL("../../settings?command=anything"))
+        XCTAssertEqual(try VSCodeIsolation.conversationURL(id, windowID: 2), "vscode://openai.chatgpt/local/" + id.lowercased() + "?windowId=2")
+        XCTAssertThrowsError(try VSCodeIsolation.conversationURL(id, windowID: -1))
+        XCTAssertEqual(VSCodeIsolation.windowIDs("    0 12345 33379 window [1] (Account Dock)\n    6 23456 54579 window [2] (Account Dock)\nwindow [99] in arbitrary text"), [1, 2])
     }
     func testMissingDatabaseDoesNotCreateOne() async {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
