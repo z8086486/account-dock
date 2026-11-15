@@ -45,7 +45,7 @@ final class ConversationTests: XCTestCase {
     }
     @MainActor func testConversationLinkRejectsInvalidInput() throws {
         let id = UUID().uuidString
-        XCTAssertEqual(try VSCodeIsolation.conversationURL(id), "vscode://openai.chatgpt/local/" + id.lowercased())
+        XCTAssertEqual(try VSCodeIsolation.conversationURL(id), "vscode://openai.chatgpt/local/" + id.lowercased() + "?windowId=_blank")
         XCTAssertThrowsError(try VSCodeIsolation.conversationURL("../../settings?command=anything"))
     }
     func testMissingDatabaseDoesNotCreateOne() async {

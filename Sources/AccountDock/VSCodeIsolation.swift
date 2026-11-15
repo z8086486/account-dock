@@ -204,7 +204,9 @@ enum VSCodeIsolation {
     }
     static func conversationURL(_ id: String) throws -> String {
         guard UUID(uuidString: id) != nil else { throw DockError.message("올바른 대화 ID가 아닙니다.") }
-        return "vscode://openai.chatgpt/local/" + id.lowercased()
+        // --open-url routes independently of --new-window. VS Code consumes this
+        // query parameter, creates an empty window, waits for it, then dispatches the URI.
+        return "vscode://openai.chatgpt/local/" + id.lowercased() + "?windowId=_blank"
     }
     static func launch(_ workspace: Workspace, conversationID: String? = nil) async throws {
         let home = workspace.home, userData = workspace.userData
