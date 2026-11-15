@@ -18,11 +18,12 @@ final class CodexConnection {
     var notification: ((String, [String: Any]) -> Void)?
     var serverRequest: ((String) -> Void)?
 
-    init(binary: URL, home: URL, ephemeral: Bool = false) throws {
+    init(binary: URL, home: URL, ephemeral: Bool = false, sqliteHome: URL? = nil) throws {
         process.executableURL = binary
         process.arguments = (ephemeral ? ["-c", "cli_auth_credentials_store=\"ephemeral\""] : []) + ["app-server", "--listen", "stdio://"]
         var environment = ProcessInfo.processInfo.environment
         environment["CODEX_HOME"] = home.path
+        if let sqliteHome { environment["CODEX_SQLITE_HOME"] = sqliteHome.path }
         environment.removeValue(forKey: "OPENAI_API_KEY")
         environment.removeValue(forKey: "CODEX_ACCESS_TOKEN")
         process.environment = environment

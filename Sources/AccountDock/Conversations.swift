@@ -95,13 +95,20 @@ struct ConversationExplorer: View {
     @State private var error: String?
     @State private var loading = false
     @State private var expanded: Set<String> = []
+    @State private var selectedQuote: String?
+    @State private var sideParent: String?
+    @State private var showSideChat = false
     private var current: LocalConversation? { conversations.first { $0.id == selected } }
     private var roots: [LocalConversation] {
         let ids = Set(conversations.map(\.id))
-        return conversations.filter { item in
-            (item.parentID == nil || !ids.contains(item.parentID!)) &&
-            (search.isEmpty || item.title.localizedCaseInsensitiveContains(search) || conversations.contains { $0.parentID == item.id && $0.title.localizedCaseInsensitiveContains(search) })
+        var matches = Set(conversations.filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) }.map(\.id))
+        let parents = Dictionary(uniqueKeysWithValues: conversations.compactMap { item in item.parentID.map { (item.id, $0) } })
+        for id in Array(matches) {
+            var next = parents[id]
+            var seen: Set<String> = [id]
+            while let parent = next, seen.insert(parent).inserted { matches.insert(parent); next = parents[parent] }
         }
+        return conversations.filter { ($0.parentID == nil || !ids.contains($0.parentID!)) && matches.contains($0.id) }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -113,20 +120,7 @@ struct ConversationExplorer: View {
             HStack(alignment: .top, spacing: 16) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 4) {
-                        ForEach(roots) { root in
-                            let children = conversations.filter { $0.parentID == root.id }
-                            HStack(spacing: 4) {
-                                if !children.isEmpty {
-                                    Button { if expanded.contains(root.id) { expanded.remove(root.id) } else { expanded.insert(root.id) } } label: {
-                                        Image(systemName: expanded.contains(root.id) || !search.isEmpty ? "chevron.down" : "chevron.right").frame(width: 16)
-                                    }.buttonStyle(.plain).accessibilityLabel("사이드 채팅 펼치기 또는 접기")
-                                }
-                                row(root, side: false)
-                            }
-                            if expanded.contains(root.id) || !search.isEmpty {
-                                ForEach(children) { child in row(child, side: true).padding(.leading, 22) }
-                            }
-                        }
+                        ForEach(roots) { root in treeRow(root, ancestors: []) }
                     }
                 }.frame(width: 240)
                 Divider()
@@ -144,32 +138,74 @@ struct ConversationExplorer: View {
                                 }
                             }.disabled(account.isEmpty || model.busy || model.refreshingUsage)
                         }
-                        Text("읽기 전용 미리보기 · 대화는 선택한 계정의 VS Code에서 이어갑니다. 같은 대화의 동시 작업은 피하세요.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 16) {
-                                if cursor != nil { Button("이전 메시지 보기") { Task { await load(older: true) } }.disabled(loading) }
-                                ForEach(messages) { item in
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text(item.role == "userMessage" ? "나" : "Codex").font(.caption.bold()).foregroundStyle(.secondary)
-                                        Text(item.text).textSelection(.enabled).font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-                                    }.padding(12).background(.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
-                                }
-                                if loading { ProgressView() }
-                                if !loading && messages.isEmpty { Text("표시할 메시지가 없습니다.").foregroundStyle(.secondary) }
-                            }
+                        HStack {
+                            Text("대화 기록").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            if cursor != nil { Button("이전 메시지 보기") { Task { await load(older: true) } }.disabled(loading) }
+                            if loading { ProgressView().controlSize(.small) }
+                        }
+                        ConversationTranscript(messages: messages) { quote in
+                            selectedQuote = quote
+                            sideParent = current.id
+                            showSideChat = true
                         }.id(current.id)
+                            .background(.white.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
                     } else { ContentUnavailableView("대화를 선택하세요", systemImage: "bubble.left.and.bubble.right") }
                 }.frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(height: 560)
+            }.frame(height: 620)
         }.task { await reload() }.task(id: selected) { await load() }
+        .sheet(isPresented: $showSideChat) {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("사이드 채팅에 질문하기").font(.title2.bold())
+                ScrollView { Text(selectedQuote ?? "").font(.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(14) }
+                    .frame(maxHeight: 180).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                Picker("실행 계정", selection: $account) {
+                    Text("계정 선택").tag("")
+                    ForEach(model.presets) { Text($0.displayName).tag($0.id) }
+                }
+                Text("선택한 내용과 원본 대화의 문맥을 이어받습니다. 질문은 새 VS Code 창에서 입력하세요.")
+                    .font(.callout).foregroundStyle(.secondary)
+                HStack {
+                    Spacer()
+                    Button("취소") { showSideChat = false }.keyboardShortcut(.cancelAction)
+                    Button("사이드 채팅 열기") {
+                        guard let parent = sideParent, let quote = selectedQuote,
+                              let preset = model.presets.first(where: { $0.id == account }) else { return }
+                        showSideChat = false
+                        Task {
+                            await model.applyToVSCode(preset, sideChat: SideChatRequest(parentID: parent, quote: quote))
+                            expanded.insert(parent)
+                            await reload()
+                        }
+                    }.buttonStyle(.borderedProminent).disabled(account.isEmpty || model.busy || model.refreshingUsage)
+                }
+            }.padding(24).frame(width: 520)
+        }
+    }
+    private func treeRow(_ item: LocalConversation, ancestors: Set<String>) -> AnyView {
+        let children = conversations.filter { $0.parentID == item.id && !ancestors.contains($0.id) && $0.id != item.id }
+        let open = expanded.contains(item.id) || !search.isEmpty
+        return AnyView(VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 2) {
+                if !children.isEmpty {
+                    Button { if open { expanded.remove(item.id) } else { expanded.insert(item.id) } } label: {
+                        Image(systemName: open ? "chevron.down" : "chevron.right").font(.caption).frame(width: 16)
+                    }.buttonStyle(.plain).accessibilityLabel("사이드 채팅 펼치기 또는 접기")
+                }
+                row(item, side: !ancestors.isEmpty)
+            }
+            if open && ancestors.count < 20 {
+                ForEach(children) { child in treeRow(child, ancestors: ancestors.union([item.id])).padding(.leading, 14) }
+            }
+        })
     }
     private func row(_ item: LocalConversation, side: Bool) -> some View {
         Button { selected = item.id } label: {
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.title).font(.system(size: 12, weight: .medium)).lineLimit(2)
+                Text(item.title).font(.system(size: 13, weight: .medium)).lineLimit(2)
                 Text((side ? "사이드 채팅 · " : "") + (item.archived ? "보관됨 · " : "") + item.updated.formatted(date: .abbreviated, time: .omitted))
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
                 .background(selected == item.id ? DockTheme.blue.opacity(0.35) : .clear, in: RoundedRectangle(cornerRadius: 8))
                 .contentShape(Rectangle())

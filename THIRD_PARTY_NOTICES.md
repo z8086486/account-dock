@@ -17,3 +17,15 @@ modification in the app at `Contents/Resources/licenses/Sparkle-LICENSE.txt`.
 
 VS Code and the official Codex extension are installed separately and are not
 redistributed in Account Dock's app bundle. Their own terms apply.
+
+## markdown-it 14.1.0
+
+The local conversation reader uses markdown-it to render Markdown with raw HTML
+and external image loading disabled. No remote scripts are loaded.
+
+- Source: https://github.com/markdown-it/markdown-it/tree/14.1.0
+- License: [MIT](licenses/markdown-it-LICENSE.txt)
+- Bundled distribution: `markdown-it@14.1.0/dist/markdown-it.min.js`
+
+Bundled browser dependencies (mdurl, uc.micro, linkify-it, punycode.js, entities):
+[upstream license notices](licenses/markdown-it-dependencies.txt).

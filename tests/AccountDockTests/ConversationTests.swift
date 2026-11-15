@@ -57,3 +57,50 @@ final class ConversationTests: XCTestCase {
         catch { XCTAssertFalse(FileManager.default.fileExists(atPath: home.path)) }
     }
 }
+
+extension ConversationTests {
+    func testSideChatSelectionValidation() throws {
+        let id = UUID().uuidString
+        XCTAssertNoThrow(try SideChatRequest(parentID: id, quote: "선택한 문장").validate())
+        XCTAssertThrowsError(try SideChatRequest(parentID: "invalid", quote: "text").validate())
+        XCTAssertThrowsError(try SideChatRequest(parentID: id, quote: " \n").validate())
+        XCTAssertThrowsError(try SideChatRequest(parentID: id, quote: String(repeating: "가", count: 22000)).validate())
+    }
+}
+
+
+extension ConversationTests {
+    @MainActor func testNativeAttachedForkKeepsSelectedContextAcrossRestart() async throws {
+        guard ProcessInfo.processInfo.environment["ACCOUNT_DOCK_CODEX_INTEGRATION"] == "1" else { throw XCTSkip("Requires installed Codex; opt-in isolated integration test") }
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("accountdock-side-test-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let connection = try CodexConnection(binary: CodexService.binary(), home: home, sqliteHome: home)
+        try await connection.initialize()
+        let start = try await connection.request("thread/start", params: ["historyMode": "paginated", "threadSource": "user", "cwd": home.path])
+        let parent = try XCTUnwrap((start["thread"] as? [String: Any])?["id"] as? String)
+        _ = try await connection.request("thread/inject_items", params: ["threadId": parent, "items": [["type": "message", "role": "user", "content": [["type": "input_text", "text": "Synthetic parent context"]]]]])
+        await connection.shutdown()
+        let request = SideChatRequest(parentID: parent, quote: "선택한 문장 — 계정 독립 테스트")
+        let child = try await SideChatService.create(request, home: home, storageHome: home)
+        let rows = try await ConversationReader(home: home).conversations()
+        XCTAssertEqual(rows.first(where: { $0.id == child })?.parentID, parent)
+        XCTAssertEqual(rows.first(where: { $0.id == child })?.title, request.title)
+        let reopened = try CodexConnection(binary: CodexService.binary(), home: home, sqliteHome: home)
+        try await reopened.initialize()
+        let read = try await reopened.request("thread/read", params: ["threadId": child, "includeTurns": false])
+        let thread = try XCTUnwrap(read["thread"] as? [String: Any])
+        XCTAssertEqual(thread["attachedToThreadId"] as? String, parent)
+        XCTAssertEqual(thread["forkedFromId"] as? String, parent)
+        XCTAssertEqual(thread["historyMode"] as? String, "paginated")
+        let path = try XCTUnwrap(thread["path"] as? String)
+        let stored = try String(contentsOfFile: path, encoding: .utf8)
+        XCTAssertTrue(stored.contains(request.quote))
+        let parentRead = try await reopened.request("thread/read", params: ["threadId": parent, "includeTurns": false])
+        let parentPath = try XCTUnwrap((parentRead["thread"] as? [String: Any])?["path"] as? String)
+        let parentContent = try String(contentsOfFile: parentPath, encoding: .utf8)
+        XCTAssertTrue(parentContent.contains("Synthetic parent context"))
+        XCTAssertFalse(parentContent.contains(request.quote))
+        await reopened.shutdown()
+    }
+}
