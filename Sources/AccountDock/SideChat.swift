@@ -12,19 +12,30 @@ struct SideChatRequest: Sendable {
 }
 
 @MainActor enum SideChatService {
-    static func create(_ request: SideChatRequest, home: URL, storageHome: URL = VSCodeEnvironment.originalHome) async throws -> String {
+    static func create(_ request: SideChatRequest, home: URL, storageHome: URL = VSCodeEnvironment.originalHome, linksURL: URL = SideChatLinks.url) async throws -> String {
         try request.validate()
         let connection = try CodexConnection(binary: CodexService.binary(), home: home, sqliteHome: storageHome)
         do {
             try await connection.initialize()
             // Native attached fork: shared history stays in Codex's own storage contract.
             // No turn/start: inference and tool execution begin only in the VS Code UI.
-            let result = try await connection.request("thread/fork", params: [
-                "threadId": request.parentID, "attachToSource": true, "excludeTurns": true, "threadSource": "user"
-            ], timeout: 45)
+            let result: [String: Any]
+            do {
+                result = try await connection.request("thread/fork", params: [
+                    "threadId": request.parentID, "attachToSource": true, "excludeTurns": true, "threadSource": "user"
+                ], timeout: 45)
+            } catch let error as CodexRPCError where error.isActiveWriter {
+                // A live source belongs to another app-server. Ordinary forks use its persisted
+                // history without acquiring its writer lease; Account Dock keeps the hierarchy.
+                result = try await connection.request("thread/fork", params: [
+                    "threadId": request.parentID, "attachToSource": false, "excludeTurns": true,
+                    "threadSource": "user", "deferGoalContinuation": true
+                ], timeout: 45)
+            }
             guard let thread = result["thread"] as? [String: Any], let id = thread["id"] as? String,
                   UUID(uuidString: id) != nil else { throw DockError.message("사이드 채팅 생성 결과를 확인하지 못했습니다.") }
             do {
+                try SideChatLinks.record(child: id, parent: request.parentID, at: linksURL)
                 _ = try await connection.request("thread/inject_items", params: ["threadId": id, "items": [
                     ["type": "message", "role": "user", "content": [["type": "input_text", "text": request.context]]]
                 ]])
@@ -35,5 +46,26 @@ struct SideChatRequest: Sendable {
             await connection.shutdown()
             return id
         } catch { await connection.shutdown(); throw error }
+    }
+}
+
+
+/// Only relationship IDs are stored here; conversation text remains in Codex storage.
+enum SideChatLinks {
+    static var url: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/AccountDock/conversation-links.json") }
+    static func read(at url: URL = url) throws -> [String: String] {
+        guard FileManager.default.fileExists(atPath: url.path) else { return [:] }
+        let data = try Data(contentsOf: url)
+        guard data.count <= 2_000_000 else { throw DockError.message("사이드 채팅 연결 목록이 너무 큽니다.") }
+        let links = try JSONDecoder().decode([String: String].self, from: data)
+        return links.filter { UUID(uuidString: $0.key) != nil && UUID(uuidString: $0.value) != nil && $0.key != $0.value }
+    }
+    static func record(child: String, parent: String, at url: URL = url) throws {
+        guard UUID(uuidString: child) != nil, UUID(uuidString: parent) != nil, child != parent else { throw DockError.message("사이드 채팅 연결을 저장하지 못했습니다.") }
+        var links = try read(at: url)
+        links[child] = parent
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(links).write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }

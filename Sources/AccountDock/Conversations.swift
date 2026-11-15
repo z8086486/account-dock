@@ -18,7 +18,8 @@ struct ConversationMessage: Identifiable, Sendable {
 /// Never opens authentication files or writes to Codex databases.
 actor ConversationReader {
     let home: URL
-    init(home: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")) { self.home = home }
+    let linksURL: URL
+    init(home: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex"), linksURL: URL = SideChatLinks.url) { self.home = home; self.linksURL = linksURL }
     private func query(_ file: String, sql: String, values: [String] = []) throws -> [[String]] {
         let path = home.appendingPathComponent(file)
         guard FileManager.default.fileExists(atPath: path.path) else { throw DockError.message("로컬 대화 저장소를 찾지 못했습니다.") }
@@ -48,13 +49,14 @@ actor ConversationReader {
         return rows
     }
     func conversations() throws -> [LocalConversation] {
-        try query("state_5.sqlite", sql: """
+        let links = try SideChatLinks.read(at: linksURL)
+        return try query("state_5.sqlite", sql: """
             SELECT id, attached_thread_parent_id, COALESCE(NULLIF(name,''),NULLIF(title,''),'제목 없는 대화'), updated_at, archived
             FROM threads WHERE (thread_source = 'user' OR (thread_source IS NULL AND source IN ('vscode','cli','exec')))
             ORDER BY updated_at DESC LIMIT 5000
             """).compactMap { row in
                 guard UUID(uuidString: row[0]) != nil else { return nil }
-                return LocalConversation(id: row[0], parentID: row[1].isEmpty ? nil : row[1],
+                return LocalConversation(id: row[0], parentID: row[1].isEmpty ? links[row[0]] : row[1],
                     title: String(row[2].prefix(300)), updated: Date(timeIntervalSince1970: Double(row[3]) ?? 0), archived: row[4] == "1")
             }
     }

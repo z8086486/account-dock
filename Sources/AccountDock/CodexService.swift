@@ -4,6 +4,13 @@ import Darwin
 
 /// A bounded, cancellable JSON-RPC connection to the installed official Codex binary.
 /// Credentials travel only over stdin; stderr and unsolicited payloads are never logged.
+struct CodexRPCError: LocalizedError {
+    let code: Int
+    let serverMessage: String
+    var isActiveWriter: Bool { code == -32600 && serverMessage.hasPrefix("thread ") && serverMessage.hasSuffix(" already has an active writer") }
+    var errorDescription: String? { "Codex가 요청을 처리하지 못했습니다." }
+}
+
 @MainActor
 final class CodexConnection {
     private let process = Process()
@@ -81,7 +88,7 @@ final class CodexConnection {
                 if message["id"] != nil { serverRequest?(method) }
                 else { notification?(method, message["params"] as? [String: Any] ?? [:]) }
             } else if let id = message["id"] as? Int {
-                if message["error"] != nil { resolve(id, .failure(DockError.message("Codex가 요청을 처리하지 못했습니다."))) }
+                if let error = message["error"] as? [String: Any] { resolve(id, .failure(CodexRPCError(code: error["code"] as? Int ?? -1, serverMessage: error["message"] as? String ?? ""))) }
                 else {
                     do { resolve(id, .success(try JSONSerialization.data(withJSONObject: message["result"] as? [String: Any] ?? [:]))) }
                     catch { resolve(id, .failure(error)) }

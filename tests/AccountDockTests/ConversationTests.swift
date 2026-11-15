@@ -80,9 +80,15 @@ extension ConversationTests {
         let start = try await connection.request("thread/start", params: ["historyMode": "paginated", "threadSource": "user", "cwd": home.path])
         let parent = try XCTUnwrap((start["thread"] as? [String: Any])?["id"] as? String)
         _ = try await connection.request("thread/inject_items", params: ["threadId": parent, "items": [["type": "message", "role": "user", "content": [["type": "input_text", "text": "Synthetic parent context"]]]]])
+        let liveRequest = SideChatRequest(parentID: parent, quote: "열린 원본의 선택 내용")
+        let liveChild = try await SideChatService.create(liveRequest, home: home, storageHome: home, linksURL: home.appendingPathComponent("links.json"))
+        let liveRows = try await ConversationReader(home: home, linksURL: home.appendingPathComponent("links.json")).conversations()
+        XCTAssertEqual(liveRows.first(where: { $0.id == liveChild })?.parentID, parent)
+        // Source writer remains responsive after the fallback fork.
+        _ = try await connection.request("thread/read", params: ["threadId": parent, "includeTurns": false])
         await connection.shutdown()
         let request = SideChatRequest(parentID: parent, quote: "선택한 문장 — 계정 독립 테스트")
-        let child = try await SideChatService.create(request, home: home, storageHome: home)
+        let child = try await SideChatService.create(request, home: home, storageHome: home, linksURL: home.appendingPathComponent("links.json"))
         let rows = try await ConversationReader(home: home).conversations()
         XCTAssertEqual(rows.first(where: { $0.id == child })?.parentID, parent)
         XCTAssertEqual(rows.first(where: { $0.id == child })?.title, request.title)
@@ -102,5 +108,21 @@ extension ConversationTests {
         XCTAssertTrue(parentContent.contains("Synthetic parent context"))
         XCTAssertFalse(parentContent.contains(request.quote))
         await reopened.shutdown()
+    }
+}
+
+
+extension ConversationTests {
+    func testWriterFailureClassificationAndLinkPersistence() throws {
+        XCTAssertTrue(CodexRPCError(code: -32600, serverMessage: "thread example already has an active writer").isActiveWriter)
+        XCTAssertFalse(CodexRPCError(code: -32600, serverMessage: "unknown method").isActiveWriter)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("links.json")
+        let parent = UUID().uuidString, child = UUID().uuidString
+        try SideChatLinks.record(child: child, parent: parent, at: path)
+        XCTAssertEqual(try SideChatLinks.read(at: path)[child], parent)
+        XCTAssertThrowsError(try SideChatLinks.record(child: parent, parent: parent, at: path))
+        XCTAssertEqual(try SideChatLinks.read(at: path).count, 1)
     }
 }
