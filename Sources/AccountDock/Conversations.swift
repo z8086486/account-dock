@@ -97,18 +97,21 @@ struct ConversationExplorer: View {
     private let reader = ConversationReader()
     @State private var conversations: [LocalConversation] = []
     @State private var selected: String?
-    @State private var account = ""
+    @AppStorage("accountDock.conversationAccount") private var account = ""
     @State private var search = ""
     @State private var messages: [ConversationMessage] = []
     @State private var cursor: Int64?
     @State private var error: String?
     @State private var loading = false
+    @State private var refreshingList = false
+    @FocusState private var searchFocused: Bool
     @State private var expanded: Set<String> = []
     @State private var selectedQuote: String?
     @State private var sideParent: String?
     @State private var showSideChat = false
     @State private var pendingDeletion: LocalConversation?
     @State private var showDeletion = false
+    private var selectedPreset: AccountPreset? { model.presets.first { $0.id == account } }
     private var current: LocalConversation? { conversations.first { $0.id == selected } }
     private var roots: [LocalConversation] {
         let ids = Set(conversations.map(\.id))
@@ -123,15 +126,35 @@ struct ConversationExplorer: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                TextField("대화 검색", text: $search).textFieldStyle(.roundedBorder)
-                Button("목록 새로고침") { Task { await reload() } }
+            HStack(spacing: 10) {
+                HStack(spacing: 9) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(DockTheme.muted)
+                    TextField("대화 검색", text: $search)
+                        .textFieldStyle(.plain).font(.system(size: 13)).focused($searchFocused)
+                    if !search.isEmpty {
+                        Button { search = ""; searchFocused = true } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(DockTheme.muted)
+                        }.buttonStyle(.plain).help("검색 지우기").accessibilityLabel("검색 지우기")
+                    }
+                }.modifier(DockFieldSurface(focused: searchFocused))
+                Button { Task { await reload(); await load() } } label: {
+                    HStack(spacing: 7) {
+                        if refreshingList { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "arrow.clockwise") }
+                        Text("새로고침")
+                    }.frame(height: 22)
+                }.buttonStyle(DockButtonStyle()).fixedSize()
+                    .help("대화 목록과 메시지 새로고침").disabled(refreshingList || loading || model.busy)
             }
             if let error { Text(error).font(.callout).foregroundStyle(.secondary) }
             HStack(alignment: .top, spacing: 16) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 4) {
                         ForEach(roots) { root in treeRow(root, ancestors: []) }
+                        if roots.isEmpty && !refreshingList {
+                            Text(search.isEmpty ? "저장된 대화가 없습니다." : "검색 결과가 없습니다.")
+                                .font(.system(size: 12)).foregroundStyle(DockTheme.muted).padding(.top, 24)
+                        }
                     }
                 }.frame(width: 240)
                 Divider()
@@ -142,26 +165,36 @@ struct ConversationExplorer: View {
                             Spacer()
                             Button { pendingDeletion = current; showDeletion = true } label: {
                                 Image(systemName: "trash")
-                            }.buttonStyle(.borderless).foregroundStyle(.secondary)
+                            }.buttonStyle(DockButtonStyle(kind: .quiet))
                                 .help("이 대화 완전 삭제").accessibilityLabel("이 대화 완전 삭제")
                                 .disabled(model.busy || model.refreshingUsage)
                         }
-                        HStack {
-                            Picker("실행 계정", selection: $account) {
-                                Text("계정 선택").tag("")
-                                ForEach(model.presets) { Text($0.displayName).tag($0.id) }
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("실행 계정").font(.system(size: 11, weight: .medium)).foregroundStyle(DockTheme.muted)
+                            HStack(spacing: 10) {
+                                ConversationAccountMenu(presets: model.presets, selection: $account)
+                                    .disabled(model.busy || model.refreshingUsage)
+                                Button {
+                                    if let preset = selectedPreset { Task { await model.applyToVSCode(preset, conversationID: current.id) } }
+                                } label: {
+                                    Label("VS Code 새 창에서 열기", systemImage: "arrow.up.forward.app")
+                                        .frame(height: 22)
+                                }.buttonStyle(DockButtonStyle(kind: .primary)).fixedSize()
+                                    .disabled(selectedPreset == nil || model.busy || model.refreshingUsage)
                             }
-                            Button("VS Code 새 창에서 열기") {
-                                if let preset = model.presets.first(where: { $0.id == account }) {
-                                    Task { await model.applyToVSCode(preset, conversationID: current.id) }
-                                }
-                            }.disabled(account.isEmpty || model.busy || model.refreshingUsage)
                         }
                         HStack {
-                            Text("대화 기록").font(.caption).foregroundStyle(.secondary)
+                            Text("대화 기록").font(.system(size: 12, weight: .medium)).foregroundStyle(DockTheme.muted)
                             Spacer()
-                            if cursor != nil { Button("이전 메시지 보기") { Task { await load(older: true) } }.disabled(loading) }
-                            if loading { ProgressView().controlSize(.small) }
+                            if cursor != nil {
+                                Button { Task { await load(older: true) } } label: {
+                                    HStack(spacing: 7) {
+                                        if loading { ProgressView().controlSize(.small) }
+                                        else { Image(systemName: "arrow.up") }
+                                        Text("이전 메시지 보기")
+                                    }
+                                }.buttonStyle(DockButtonStyle()).disabled(loading)
+                            } else if loading { ProgressView().controlSize(.small) }
                         }
                         ConversationTranscript(messages: messages) { quote in
                             selectedQuote = quote
@@ -195,15 +228,15 @@ struct ConversationExplorer: View {
                 Text("사이드 채팅에 질문하기").font(.title2.bold())
                 ScrollView { Text(selectedQuote ?? "").font(.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(14) }
                     .frame(maxHeight: 180).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
-                Picker("실행 계정", selection: $account) {
-                    Text("계정 선택").tag("")
-                    ForEach(model.presets) { Text($0.displayName).tag($0.id) }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("실행 계정").font(.system(size: 11, weight: .medium)).foregroundStyle(DockTheme.muted)
+                    ConversationAccountMenu(presets: model.presets, selection: $account)
                 }
                 Text("선택한 내용과 원본 대화의 문맥을 이어받습니다. 질문은 새 VS Code 창에서 입력하세요.")
                     .font(.callout).foregroundStyle(.secondary)
                 HStack {
                     Spacer()
-                    Button("취소") { showSideChat = false }.keyboardShortcut(.cancelAction)
+                    Button("취소") { showSideChat = false }.buttonStyle(DockButtonStyle()).keyboardShortcut(.cancelAction)
                     Button("사이드 채팅 열기") {
                         guard let parent = sideParent, let quote = selectedQuote,
                               let preset = model.presets.first(where: { $0.id == account }) else { return }
@@ -213,7 +246,7 @@ struct ConversationExplorer: View {
                             expanded.insert(parent)
                             await reload()
                         }
-                    }.buttonStyle(.borderedProminent).disabled(account.isEmpty || model.busy || model.refreshingUsage)
+                    }.buttonStyle(DockButtonStyle(kind: .primary)).disabled(selectedPreset == nil || model.busy || model.refreshingUsage)
                 }
             }.padding(24).frame(width: 520)
         }
@@ -247,11 +280,17 @@ struct ConversationExplorer: View {
         }.buttonStyle(.plain)
     }
     private func reload() async {
-        do { conversations = try await reader.conversations(); error = nil }
+        guard !refreshingList else { return }
+        refreshingList = true
+        defer { refreshingList = false }
+        do {
+            conversations = try await reader.conversations(); error = nil
+            if let selected, !conversations.contains(where: { $0.id == selected }) { self.selected = nil; messages = []; cursor = nil }
+        }
         catch { self.error = error.localizedDescription }
     }
     private func load(older: Bool = false) async {
-        guard let id = selected else { return }
+        guard let id = selected else { loading = false; return }
         if !older { messages = []; cursor = nil }
         loading = true
         do {
@@ -260,5 +299,52 @@ struct ConversationExplorer: View {
             if older { messages.insert(contentsOf: page.messages, at: 0) } else { messages = page.messages }
             cursor = page.cursor; error = nil; loading = false
         } catch { if selected == id { self.error = error.localizedDescription; loading = false } }
+    }
+}
+
+
+struct ConversationAccountMenu: View {
+    let presets: [AccountPreset]
+    @Binding var selection: String
+    @State private var presented = false
+    @State private var hovered: String?
+    private var selected: AccountPreset? { presets.first { $0.id == selection } }
+    var body: some View {
+        Button { presented.toggle() } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "person.crop.circle").font(.system(size: 17)).foregroundStyle(DockTheme.muted)
+                Text(selected?.displayName ?? "계정 선택").font(.system(size: 13, weight: .medium)).lineLimit(1).layoutPriority(1)
+                Spacer(minLength: 4)
+                if let selected {
+                    Text(selected.planLabel).font(.system(size: 10, weight: .medium)).lineLimit(1)
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(DockTheme.blue.opacity(0.28), in: Capsule())
+                }
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(DockTheme.muted)
+            }.frame(maxWidth: .infinity).modifier(DockFieldSurface(focused: presented))
+                .contentShape(RoundedRectangle(cornerRadius: 9))
+        }.buttonStyle(.plain)
+            .accessibilityLabel("실행 계정").accessibilityValue(selected?.displayName ?? "계정 선택")
+            .popover(isPresented: $presented, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("실행 계정").font(.system(size: 12, weight: .semibold)).foregroundStyle(DockTheme.muted).padding(10)
+                    if presets.isEmpty { Text("저장한 계정이 없습니다.").font(.callout).padding(10) }
+                    ForEach(presets) { preset in
+                        Button { selection = preset.id; presented = false } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "person.crop.circle").font(.system(size: 20)).foregroundStyle(DockTheme.muted)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(preset.displayName).font(.system(size: 13, weight: .medium)).lineLimit(2)
+                                    Text(preset.planLabel).font(.system(size: 11)).foregroundStyle(DockTheme.muted)
+                                }
+                                Spacer(minLength: 8)
+                                if selection == preset.id { Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold)) }
+                            }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(DockTheme.blue.opacity(selection == preset.id ? 0.3 : hovered == preset.id ? 0.15 : 0), in: RoundedRectangle(cornerRadius: 8))
+                                .contentShape(RoundedRectangle(cornerRadius: 8))
+                        }.buttonStyle(.plain).onHover { hovered = $0 ? preset.id : nil }
+                    }
+                }.padding(6).frame(width: 300).foregroundStyle(DockTheme.navy)
+            }
     }
 }
