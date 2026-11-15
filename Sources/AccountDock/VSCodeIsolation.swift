@@ -202,7 +202,52 @@ enum VSCodeIsolation {
         result["CODEX_SQLITE_HOME"] = VSCodeEnvironment.originalHome.path
         return result
     }
-    static func launch(_ workspace: Workspace) async throws {
+    static func conversationURL(_ id: String, windowID: Int? = nil) throws -> String {
+        guard UUID(uuidString: id) != nil, windowID == nil || windowID! > 0 else { throw DockError.message("올바른 대화 또는 창 ID가 아닙니다.") }
+        return "vscode://openai.chatgpt/local/" + id.lowercased() + "?windowId=" + (windowID.map(String.init) ?? "_blank")
+    }
+    static func windowIDs(_ status: String) -> Set<Int> {
+        let regex = try! NSRegularExpression(pattern: #"(?m)^\s*[0-9.]+\s+[0-9.]+\s+\d+\s+window \[(\d+)\]"#)
+        return Set(regex.matches(in: status, range: NSRange(status.startIndex..., in: status)).compactMap {
+            Range($0.range(at: 1), in: status).flatMap { Int(status[$0]) }
+        })
+    }
+    private static func command(_ workspace: Workspace, arguments: [String]) async throws -> String {
+        let task = Process()
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        FileManager.default.createFile(atPath: temp.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        let output = try FileHandle(forWritingTo: temp)
+        defer { try? output.close(); try? FileManager.default.removeItem(at: temp) }
+        task.executableURL = executable
+        task.arguments = ["--user-data-dir", workspace.userData.path, "--extensions-dir", FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".vscode/extensions").path] + arguments
+        task.environment = launchEnvironment(ProcessInfo.processInfo.environment, home: workspace.home)
+        task.standardOutput = output; task.standardError = FileHandle.nullDevice
+        try task.run()
+        let deadline = Date().addingTimeInterval(20)
+        while task.isRunning {
+            if Task.isCancelled || Date() > deadline { task.terminate(); throw DockError.message("VS Code 창 확인 시간이 초과되었습니다.") }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard task.terminationStatus == 0 else { throw DockError.message("VS Code 창 명령을 실행하지 못했습니다.") }
+        return String(decoding: try Data(contentsOf: temp), as: UTF8.self)
+    }
+    static func launch(_ workspace: Workspace, conversationID: String? = nil) async throws {
+        if let conversationID {
+            _ = try conversationURL(conversationID)
+            let before = try isRunning(workspace) ? windowIDs(try await command(workspace, arguments: ["--status"])) : []
+            _ = try await command(workspace, arguments: ["--new-window", "--skip-welcome", "--skip-release-notes"])
+            for _ in 0..<10 {
+                let current = windowIDs(try await command(workspace, arguments: ["--status"]))
+                let added = current.subtracting(before)
+                guard added.count <= 1 else { throw DockError.message("새 창이 여러 개 감지되어 대화 링크를 보내지 않았습니다.") }
+                if let id = added.first {
+                    _ = try await command(workspace, arguments: ["--open-url", conversationURL(conversationID, windowID: id)])
+                    return
+                }
+                try await Task.sleep(for: .milliseconds(300))
+            }
+            throw DockError.message("새 VS Code 창을 확인하지 못해 기존 창으로 대화를 보내지 않았습니다.")
+        }
         let home = workspace.home, userData = workspace.userData
         let task = Process()
         task.executableURL = executable
