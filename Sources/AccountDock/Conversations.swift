@@ -60,6 +60,13 @@ actor ConversationReader {
                     title: String(row[2].prefix(300)), updated: Date(timeIntervalSince1970: Double(row[3]) ?? 0), archived: row[4] == "1")
             }
     }
+    func hasChildren(threadID: String) throws -> Bool {
+        if !(try query("state_5.sqlite", sql: "SELECT id FROM threads WHERE attached_thread_parent_id = ? LIMIT 1", values: [threadID])).isEmpty { return true }
+        for (child, parent) in try SideChatLinks.read(at: linksURL) where parent == threadID {
+            if !(try query("state_5.sqlite", sql: "SELECT id FROM threads WHERE id = ? LIMIT 1", values: [child])).isEmpty { return true }
+        }
+        return false
+    }
     func messages(threadID: String, before: Int64? = nil) throws -> (messages: [ConversationMessage], cursor: Int64?) {
         guard UUID(uuidString: threadID) != nil else { throw DockError.message("올바른 대화 ID가 아닙니다.") }
         let rows = try query("thread_history_1.sqlite", sql: """
@@ -100,6 +107,8 @@ struct ConversationExplorer: View {
     @State private var selectedQuote: String?
     @State private var sideParent: String?
     @State private var showSideChat = false
+    @State private var pendingDeletion: LocalConversation?
+    @State private var showDeletion = false
     private var current: LocalConversation? { conversations.first { $0.id == selected } }
     private var roots: [LocalConversation] {
         let ids = Set(conversations.map(\.id))
@@ -128,7 +137,15 @@ struct ConversationExplorer: View {
                 Divider()
                 VStack(alignment: .leading, spacing: 12) {
                     if let current {
-                        Text(current.title).font(.headline).lineLimit(3)
+                        HStack(alignment: .top) {
+                            Text(current.title).font(.headline).lineLimit(3)
+                            Spacer()
+                            Button { pendingDeletion = current; showDeletion = true } label: {
+                                Image(systemName: "trash")
+                            }.buttonStyle(.borderless).foregroundStyle(.secondary)
+                                .help("이 대화 완전 삭제").accessibilityLabel("이 대화 완전 삭제")
+                                .disabled(model.busy || model.refreshingUsage)
+                        }
                         HStack {
                             Picker("실행 계정", selection: $account) {
                                 Text("계정 선택").tag("")
@@ -157,6 +174,22 @@ struct ConversationExplorer: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }.frame(height: 620)
         }.task { await reload() }.task(id: selected) { await load() }
+        .alert("대화를 완전히 삭제할까요?", isPresented: $showDeletion) {
+            Button("취소", role: .cancel) { pendingDeletion = nil }
+            Button("완전 삭제", role: .destructive) {
+                guard let item = pendingDeletion else { return }
+                Task {
+                    if await model.deleteConversation(item.id) {
+                        if selected == item.id { selected = nil; messages = []; cursor = nil }
+                        expanded.remove(item.id)
+                    }
+                    pendingDeletion = nil
+                    await reload()
+                }
+            }
+        } message: {
+            Text("‘\(pendingDeletion?.title ?? "")’의 이 Mac에 저장된 대화 기록을 삭제합니다. 복구할 수 없습니다. 하위 대화는 먼저 개별 삭제해야 합니다.")
+        }
         .sheet(isPresented: $showSideChat) {
             VStack(alignment: .leading, spacing: 18) {
                 Text("사이드 채팅에 질문하기").font(.title2.bold())

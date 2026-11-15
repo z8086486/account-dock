@@ -303,6 +303,17 @@ final class DockModel: ObservableObject {
             showNotice("\(latest.displayName) 계정별 VS Code 창을 열었습니다.")
         } catch { message = error.localizedDescription }
     }
+    func deleteConversation(_ id: String) async -> Bool {
+        guard !busy, !refreshingUsage else { return false }
+        busy = true
+        defer { busy = false }
+        message = "대화를 삭제하고 있습니다."
+        do {
+            try await ConversationDeletion.delete(id)
+            showNotice("대화를 삭제했습니다.")
+            return true
+        } catch { message = error.localizedDescription; return false }
+    }
     private func openConversation(_ workspace: VSCodeIsolation.Workspace, conversationID: String?, sideChat: SideChatRequest?) async throws {
         let id: String?
         if let sideChat { id = try await SideChatService.create(sideChat, home: workspace.home) }

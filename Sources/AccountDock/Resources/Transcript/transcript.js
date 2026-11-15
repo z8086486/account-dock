@@ -3,6 +3,11 @@ const md=window.markdownit({html:false,linkify:false,typographer:false});
 // Conversation content cannot execute HTML or load external resources.
 md.renderer.rules.image=(tokens,i)=>md.utils.escapeHtml('[이미지: '+tokens[i].content+']');
 const host=document.getElementById('messages'),ask=document.getElementById('ask');
+const latest=document.getElementById('latest');
+function updateLatest(){latest.hidden=document.documentElement.scrollHeight-innerHeight-window.scrollY<80;}
+latest.addEventListener('click',()=>{window.scrollTo({top:document.documentElement.scrollHeight,behavior:'auto'});updateLatest();});
+window.addEventListener('scroll',updateLatest,{passive:true});
+window.addEventListener('resize',updateLatest);
 let selection=null;
 window.setMessages=(items,older)=>{
  const height=document.documentElement.scrollHeight,top=window.scrollY;
@@ -16,6 +21,8 @@ window.setMessages=(items,older)=>{
   article.append(label,content);host.append(article);
  }
  if(older)window.scrollTo(0,top+document.documentElement.scrollHeight-height);
+ else window.scrollTo(0,document.documentElement.scrollHeight);
+ updateLatest();
 };
 function updateSelection(){
  const s=window.getSelection();ask.hidden=true;selection=null;

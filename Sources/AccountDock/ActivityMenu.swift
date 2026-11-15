@@ -508,6 +508,8 @@ struct ActivityMenu: View {
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
               }.padding(.top, 4)
+                // Reserve a gutter even when macOS uses overlay scrollbars.
+                .padding(.trailing, 18)
             }
             HStack {
                 Text("등록한 계정의 로컬 기록")

@@ -69,3 +69,33 @@ enum SideChatLinks {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }
+
+
+@MainActor enum ConversationDeletion {
+    static func delete(_ id: String, storageHome: URL = VSCodeEnvironment.originalHome, linksURL: URL = SideChatLinks.url) async throws {
+        guard UUID(uuidString: id) != nil else { throw DockError.message("올바른 대화 ID가 아닙니다.") }
+        guard try await ConversationReader(home: storageHome, linksURL: linksURL).hasChildren(threadID: id) == false else {
+            throw DockError.message("하위 사이드 채팅을 먼저 삭제해 주세요. 원본 대화는 삭제하지 않았습니다.")
+        }
+        // The native delete API resolves both session roots relative to CODEX_HOME.
+        // Use the actual history home, never an unrelated temporary home.
+        try FileManager.default.createDirectory(at: storageHome.appendingPathComponent("archived_sessions"), withIntermediateDirectories: true)
+        let connection = try CodexConnection(binary: CodexService.binary(), home: storageHome, sqliteHome: storageHome)
+        do {
+            try await connection.initialize()
+            _ = try await connection.request("thread/delete", params: ["threadId": id], timeout: 30)
+            await connection.shutdown()
+        } catch {
+            await connection.shutdown()
+            if let error = error as? CodexRPCError, error.isActiveWriter {
+                throw DockError.message("다른 창에서 열려 있는 대화입니다. 해당 대화 창을 닫은 뒤 다시 삭제해 주세요.")
+            }
+            throw error
+        }
+        var links = try SideChatLinks.read(at: linksURL)
+        if links.removeValue(forKey: id) != nil {
+            try JSONEncoder().encode(links).write(to: linksURL, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: linksURL.path)
+        }
+    }
+}

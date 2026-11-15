@@ -49,5 +49,15 @@ final class TranscriptTests: XCTestCase {
                 try png.write(to: URL(fileURLWithPath: path))
             }
         }
+        let long = String(repeating: "긴 대화 문단입니다.\n\n", count: 100)
+        _ = try await view.callAsyncJavaScript("window.setMessages(items,false)", arguments: ["items": [["id": "long", "role": "agentMessage", "text": long]]], in: nil, contentWorld: .page)
+        let initialBottom = try await view.evaluateJavaScript("scrollY > 0 && document.documentElement.scrollHeight-innerHeight-scrollY < 2") as? Bool
+        XCTAssertEqual(initialBottom, true)
+        _ = try await view.evaluateJavaScript("scrollTo(0,0);dispatchEvent(new Event('scroll'));true")
+        let buttonVisible = try await view.evaluateJavaScript("!document.getElementById('latest').hidden") as? Bool
+        XCTAssertEqual(buttonVisible, true)
+        _ = try await view.evaluateJavaScript("document.getElementById('latest').click();true")
+        let returnedToBottom = try await view.evaluateJavaScript("document.documentElement.scrollHeight-innerHeight-scrollY < 2") as? Bool
+        XCTAssertEqual(returnedToBottom, true)
     }
 }
