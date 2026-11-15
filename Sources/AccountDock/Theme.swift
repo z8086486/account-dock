@@ -64,3 +64,17 @@ struct DockDisclosureStyle: DisclosureGroupStyle {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
+
+/// Form controls share the same surface, outline, and corner radius as Dock buttons.
+struct DockFieldSurface: ViewModifier {
+    var focused = false
+    @Environment(\.isEnabled) private var enabled
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 12).frame(height: 44)
+            .foregroundStyle(enabled ? DockTheme.navy : DockTheme.muted)
+            .background(enabled ? .white : DockTheme.navy.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9)
+                .strokeBorder(DockTheme.navy.opacity(focused ? 0.4 : 0.16), lineWidth: focused ? 1.5 : 1))
+    }
+}
