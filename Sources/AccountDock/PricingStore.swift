@@ -47,7 +47,8 @@ final class PricingStore: ObservableObject {
     }
     nonisolated static func fetch(_ address: String) async throws -> Data {
         var request = URLRequest(url: URL(string: address)!, timeoutInterval: 15)
-        request.setValue("AccountDock/0.12", forHTTPHeaderField: "User-Agent")
+        request.setValue("AccountDock", forHTTPHeaderField: "User-Agent")
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let response = response as? HTTPURLResponse, response.statusCode == 200, data.count <= 2_000_000 else { throw URLError(.badServerResponse) }
         return data
@@ -57,12 +58,28 @@ final class PricingStore: ObservableObject {
         guard let start = text.range(of: "### Standard pricing data") else { return [:] }
         let section = text[start.upperBound...].components(separatedBy: "###").first ?? ""
         var rates: [String: [Double]] = [:]
-        for line in section.components(separatedBy: .newlines) where line.hasPrefix("| gpt-") {
+        var header: [String] = []
+        for raw in section.components(separatedBy: .newlines) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("|") else { continue }
             let columns = line.split(separator: "|", omittingEmptySubsequences: true).map { $0.trimmingCharacters(in: .whitespaces) }
-            guard columns.count == 9, columns[0].range(of: #"^gpt-[a-z0-9.-]+$"#, options: .regularExpression) != nil else { continue }
-            let numbers = columns.dropFirst().compactMap { Double($0.replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")) }
+            if columns.first?.lowercased() == "model" { header = columns.map { $0.lowercased() }; continue }
+            guard columns.count == header.count, let model = columns.first,
+                  model.range(of: #"^gpt-[a-z0-9.-]+$"#, options: .regularExpression) != nil else { continue }
+            // Internal order: uncached input, cache read, 30-minute cache write, output.
+            // Extra columns (such as 12h writes) must never shift these meanings.
+            let fields = [
+                ["short context input"], ["short context cached input"],
+                ["short context 30m write", "short context cache write"], ["short context output"],
+                ["long context input"], ["long context cached input"],
+                ["long context 30m write", "long context cache write"], ["long context output"]
+            ]
+            let numbers = fields.compactMap { aliases -> Double? in
+                guard let index = header.firstIndex(where: { aliases.contains($0) }) else { return nil }
+                return Double(columns[index].replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: ""))
+            }
             guard numbers.count == 8, numbers.allSatisfy({ $0.isFinite && $0 >= 0 && $0 < 10000 }) else { continue }
-            rates[columns[0]] = numbers
+            rates[model] = numbers
         }
         return rates
     }

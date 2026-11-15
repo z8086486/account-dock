@@ -7,6 +7,12 @@ struct UsageWindow: Decodable, Identifiable, Sendable {
     let remainingPercent: Double
     let windowMinutes: Double?
     let resetsAt: Double?
+    var observedAt: Double? = nil
+    func needsRefresh(at now: Double, fallbackObserved: Double?) -> Bool {
+        if let resetsAt { return resetsAt <= now }
+        guard let observed = observedAt ?? fallbackObserved else { return true }
+        return now - observed > 900
+    }
     var title: String {
         guard let minutes = windowMinutes else { return bucket }
         if minutes >= 1440 { return "\(Int(minutes / 1440))일 한도 · \(bucket)" }
@@ -36,6 +42,28 @@ struct UsageReport: Decodable, Sendable {
     var credits: [CreditBalance]? = nil
     var resetCredits: Int? = nil
     let checkedAt: Double?
+    /// Partial samples update only the windows they actually contain.
+    static func merging(_ incoming: UsageReport, previous: UsageReport?) -> UsageReport {
+        guard let previous, incoming.status != "login_required" else { return incoming }
+        guard !incoming.windows.isEmpty || !incoming.activity.isEmpty || incoming.credits?.isEmpty == false || incoming.resetCredits != nil else { return previous }
+        var windows = Dictionary(previous.windows.map { window -> (String, UsageWindow) in
+            var value = window; value.observedAt = value.observedAt ?? previous.checkedAt
+            return (value.id, value)
+        }, uniquingKeysWith: { _, new in new })
+        for var window in incoming.windows {
+            window.observedAt = window.observedAt ?? incoming.checkedAt
+            if (window.observedAt ?? 0) >= (windows[window.id]?.observedAt ?? 0) { windows[window.id] = window }
+        }
+        let newer = (incoming.checkedAt ?? 0) >= (previous.checkedAt ?? 0)
+        let preferred = newer ? incoming : previous
+        let fallback = newer ? previous : incoming
+        let activity = fallback.activity.merging(preferred.activity) { _, new in new }
+        let credits = (preferred.credits?.isEmpty == false ? preferred.credits : fallback.credits)
+        return UsageReport(status: windows.isEmpty ? preferred.status : "partial",
+            windows: windows.values.sorted { ($0.windowMinutes ?? .infinity, $0.id) < ($1.windowMinutes ?? .infinity, $1.id) },
+            activity: activity, credits: credits, resetCredits: preferred.resetCredits ?? fallback.resetCredits,
+            checkedAt: max(incoming.checkedAt ?? 0, previous.checkedAt ?? 0))
+    }
 }
 
 @MainActor
@@ -77,15 +105,18 @@ enum UsageReader {
             let key = single["limitId"] as? String ?? "codex"
             groups[key] = single.merging(groups[key] ?? [:]) { old, new in new is NSNull ? old : new }
         }
+        let observed = Date().timeIntervalSince1970
         var windows: [UsageWindow] = [], credits: [CreditBalance] = []
         for key in groups.keys.sorted() {
             let group = groups[key]!
             let bucket = group["limitName"] as? String ?? key
             for role in ["primary", "secondary"] {
                 if let value = group[role] as? [String: Any], let used = number(value["usedPercent"]) {
-                    windows.append(UsageWindow(id: key + ":" + role, bucket: bucket, usedPercent: min(100, max(0, used)),
-                        remainingPercent: 100 - min(100, max(0, used)), windowMinutes: number(value["windowDurationMins"]).flatMap { $0 > 0 && $0 < 10_000_000 ? $0 : nil },
-                        resetsAt: number(value["resetsAt"]).flatMap { $0 > 0 && $0 < 100_000_000_000 ? $0 : nil }))
+                    let minutes = number(value["windowDurationMins"]).flatMap { $0 > 0 && $0 < 10_000_000 ? $0 : nil }
+                    let identity = minutes.map { key + ":minutes:" + String($0) } ?? key + ":" + role
+                    windows.append(UsageWindow(id: identity, bucket: bucket, usedPercent: min(100, max(0, used)),
+                        remainingPercent: 100 - min(100, max(0, used)), windowMinutes: minutes,
+                        resetsAt: number(value["resetsAt"]).flatMap { $0 > 0 && $0 < 100_000_000_000 ? $0 : nil }, observedAt: observed))
                 }
             }
             if let value = group["credits"] as? [String: Any] {
@@ -106,9 +137,10 @@ enum UsageReader {
         for key in ["lifetimeTokens", "peakDailyTokens"] {
             if let value = number(summary[key]), value >= 0 { totals[key] = value }
         }
+        windows = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new }).values.sorted { ($0.windowMinutes ?? .infinity, $0.id) < ($1.windowMinutes ?? .infinity, $1.id) }
         let hasData = !windows.isEmpty || !credits.isEmpty || count != nil || !totals.isEmpty
         return UsageReport(status: hasData ? (limits != nil && activity != nil ? "available" : "partial") : "unavailable",
-            windows: windows, activity: totals, credits: credits, resetCredits: count, checkedAt: Date().timeIntervalSince1970)
+            windows: windows, activity: totals, credits: credits, resetCredits: count, checkedAt: observed)
     }
     private static func number(_ value: Any?) -> Double? {
         guard let value = value as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(), value.doubleValue.isFinite else { return nil }
@@ -134,20 +166,28 @@ struct AccountUsageView: View {
                         .font(.system(size: 12)).foregroundStyle((compact ? Color(nsColor: .secondaryLabelColor) : DockTheme.muted))
                 }
                 ForEach(report.windows) { window in
+                    let observed = window.observedAt ?? report.checkedAt ?? 0
+                    let expired = window.needsRefresh(at: Date().timeIntervalSince1970, fallbackObserved: report.checkedAt)
+                    let retained = observed < (report.checkedAt ?? observed) - 1
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Text(window.title).font(.system(size: 12))
                             Spacer()
-                            Text("\(window.remainingPercent, specifier: "%.0f")% 남음")
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            if expired { Text("확인 필요").font(.system(size: 12)).foregroundStyle(.secondary) }
+                            else { Text("\(window.remainingPercent, specifier: "%.0f")% 남음")
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced)) }
                         }
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 Capsule().fill(Color.primary.opacity(0.07))
                                 Capsule().fill(window.remainingPercent <= 20 ? DockTheme.orange : DockTheme.blue)
-                                    .frame(width: geo.size.width * min(100, max(0, window.remainingPercent)) / 100)
+                                    .frame(width: expired ? 0 : geo.size.width * min(100, max(0, window.remainingPercent)) / 100)
                             }
                         }.frame(height: 6)
+                        if retained || expired {
+                            Text("최근 확인 · \(Date(timeIntervalSince1970: observed).formatted(date: .omitted, time: .shortened))")
+                                .font(.system(size: 10)).foregroundStyle(.secondary)
+                        }
                         if !compact, let reset = window.resetsAt {
                             Text("초기화 · \(Date(timeIntervalSince1970: reset).formatted(date: .abbreviated, time: .shortened))")
                                 .font(.system(size: 12)).foregroundStyle((compact ? Color(nsColor: .secondaryLabelColor) : DockTheme.muted))
@@ -235,7 +275,7 @@ enum LocalUsageReport {
         }
         let result = UsageReader.normalize(limits: ["rateLimits": group], activity: nil)
         guard result.status != "unavailable" else { return nil }
-        return UsageReport(status: result.status, windows: result.windows, activity: [:],
+        return UsageReport(status: result.status, windows: result.windows.map { var window = $0; window.observedAt = sample.date.timeIntervalSince1970; return window }, activity: [:],
             credits: result.credits, checkedAt: sample.date.timeIntervalSince1970)
     }
 }

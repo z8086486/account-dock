@@ -88,6 +88,7 @@ final class TokenCostTests: XCTestCase {
     func testOnlyStandardPriceTableIsImported() {
         let text = """
         ### Standard pricing data
+        | Model | Short context input | Short context cached input | Short context cache write | Short context output | Long context input | Long context cached input | Long context cache write | Long context output |
         | gpt-6.1-sol | $2 | $0.1 | $2.5 | $10 | $4 | $0.2 | $5 | $15 |
         | gpt-invalid | $-2 | $1 | $1 | $1 | $1 | $1 | $1 | $1 |
         ### Batch pricing data
@@ -96,6 +97,27 @@ final class TokenCostTests: XCTestCase {
         XCTAssertEqual(PricingStore.parsePrices(text)["gpt-6.1-sol"]?.first, 2)
         XCTAssertNil(PricingStore.parsePrices(text)["gpt-invalid"])
         XCTAssertTrue(PricingStore.parsePrices("<html>Changed page</html>").isEmpty)
+    }
+    func testPriceHeadersHandleAddedColumnsAndChangedOrder() {
+        let text = """
+        ### Standard pricing data
+        | Model | Short context input | Short context output | Short context cached input | Short context 30m write | Short context 12h write | Long context input | Long context output | Long context cached input | Long context 30m write | Long context 12h write |
+        | gpt-6.1-sol | $2 | $10 | $0.1 | $2.5 | $5 | $4 | $15 | $0.2 | $5 | $10 |
+        ### Fast pricing data
+        | Model | Short context input | Short context output | Short context cached input | Short context 30m write | Short context 12h write | Long context input | Long context output | Long context cached input | Long context 30m write | Long context 12h write |
+        | gpt-6.1-sol | $4 | $20 | $0.2 | $5 | $10 | $8 | $30 | $0.4 | $10 | $20 |
+        """
+        XCTAssertEqual(PricingStore.parsePrices(text)["gpt-6.1-sol"], [2, 0.1, 2.5, 10, 4, 0.2, 5, 15])
+        XCTAssertTrue(PricingStore.parsePrices(text.replacingOccurrences(of: "30m write", with: "unknown write")).isEmpty)
+    }
+    func testLiveOfficialPriceAndExchangeFetchWhenRequested() async throws {
+        guard ProcessInfo.processInfo.environment["ACCOUNT_DOCK_PRICE_INTEGRATION"] == "1" else { throw XCTSkip("Opt-in public pricing endpoint verification") }
+        let data = try await PricingStore.fetch("https://developers.openai.com/api/docs/pricing.md")
+        let rates = PricingStore.parsePrices(String(decoding: data, as: UTF8.self))
+        XCTAssertEqual(rates["gpt-6.1-sol"]?.count, 8)
+        XCTAssertEqual(rates["gpt-6-astra"]?.count, 8)
+        let fxData = try await PricingStore.fetch("https://api.frankfurter.dev/v2/rate/usd/krw")
+        XCTAssertGreaterThan(try PricingStore.parseFX(fxData).0, 0)
     }
     func testExchangePairAndRateValidation() throws {
         let data = Data(#"{"date":"2026-10-14","base":"USD","quote":"KRW","rate":1339.21}"#.utf8)

@@ -422,8 +422,7 @@ struct ActivityMenu: View {
         guard let id = accountID(preset), let sample = visibleSnapshot.limits[id],
               sample.date.timeIntervalSince1970 > (server?.checkedAt ?? 0),
               let local = LocalUsageReport.normalize(sample) else { return server }
-        return UsageReport(status: local.status, windows: local.windows, activity: server?.activity ?? [:],
-            credits: local.credits, resetCredits: server?.resetCredits, checkedAt: local.checkedAt)
+        return UsageReport.merging(local, previous: server)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -523,6 +522,7 @@ struct ActivityMenu: View {
         // A second SwiftUI material here doubles the blur and creates overlapping corners.
         .foregroundStyle(.primary)
         .background(ActivityPanelReader(panel: panel).frame(width: 0, height: 0))
+        .onReceive(monitor.$snapshot) { snapshot in model.ingestLocalUsage(snapshot.limits) }
         .onChange(of: accounts.map(\.id)) { _, ids in
             if selected != "all" && !ids.contains(selected) { selected = "all" }
         }
@@ -535,7 +535,9 @@ struct ActivityMenu: View {
                     if Date().timeIntervalSince(lastAutomatic) >= interval && !model.busy && !model.refreshingUsage {
                         let recentLocal = Set(model.presets.filter { preset in
                             guard let id = accountID(preset), let sample = monitor.snapshot.limits[id] else { return false }
-                            return Date().timeIntervalSince(sample.date) < 30 && LocalUsageReport.normalize(sample) != nil
+                            guard Date().timeIntervalSince(sample.date) < 30, let local = LocalUsageReport.normalize(sample) else { return false }
+                            let known = Set(model.usage[preset.id]?.windows.map(\.id) ?? [])
+                            return known.isSubset(of: Set(local.windows.map(\.id)))
                         }.map(\.id))
                         await model.refreshUsage(minimumInterval: interval, skippingAccounts: recentLocal)
                         lastAutomatic = Date()

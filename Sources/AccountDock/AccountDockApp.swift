@@ -337,6 +337,18 @@ final class DockModel: ObservableObject {
         } catch { message = "현재 계정을 자동 등록하지 못했습니다. 설정 화면에서 Keychain 접근을 확인해 주세요." }
     }
     private var lastUsageAttempt = Date.distantPast
+    private var localLimitDates: [String: Date] = [:]
+    func ingestLocalUsage(_ samples: [String: LocalLimitSample]) {
+        guard UserDefaults.standard.object(forKey: "accountDock.usageEnabled") as? Bool ?? true else { return }
+        for preset in presets {
+            guard let json = (try? JSONSerialization.jsonObject(with: preset.credential)) as? [String: Any],
+                  let account = (json["tokens"] as? [String: Any])?["account_id"] as? String,
+                  let sample = samples[account], sample.date > (localLimitDates[preset.id] ?? .distantPast),
+                  let report = LocalUsageReport.normalize(sample) else { continue }
+            localLimitDates[preset.id] = sample.date
+            usage[preset.id] = UsageReport.merging(report, previous: usage[preset.id])
+        }
+    }
     func refreshUsage(allowWhileAdding: Bool = false, minimumInterval: TimeInterval = 0, skippingAccounts: Set<String> = []) async {
         guard Date().timeIntervalSince(lastUsageAttempt) >= minimumInterval else { return }
         guard !refreshingUsage, (!busy || (allowWhileAdding && addingAccount)) else { return }
@@ -354,7 +366,7 @@ final class DockModel: ObservableObject {
             guard UserDefaults.standard.object(forKey: "accountDock.usageEnabled") as? Bool ?? true else {
                 usage = [:]; return
             }
-            if presets.contains(where: { $0.id == id }) { usage[id] = report }
+            if presets.contains(where: { $0.id == id }) { usage[id] = UsageReport.merging(report, previous: usage[id]) }
             usageLoading.remove(id)
         }
     }

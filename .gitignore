@@ -159,3 +159,8 @@ __pycache__/
 !/tests/AccountDockTests/TranscriptTests.swift
 
 !/licenses/markdown-it-dependencies.txt
+
+!/tests/AccountDockTests/UsageMergeTests.swift
+
+!/Sources/AccountDock/ActivityTurns.swift
+!/tests/AccountDockTests/ActivityTurnsTests.swift

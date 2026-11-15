@@ -79,7 +79,7 @@ struct TokenCostView: View {
                     .popover(isPresented: $details) {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("API 표준 단가 환산").fontWeight(.semibold)
-                            Text("실제 청구액이 아닙니다. 모델과 입력·캐시·출력 내역이 확인된 로컬 기록만 계산합니다. Fast 모드·도구 요금·세금은 제외합니다.")
+                            Text("실제 청구액이 아닙니다. 모델과 입력·캐시·출력 내역이 확인된 로컬 기록만 계산합니다. 캐시 쓰기는 30분 단가 기준이며, Fast 모드·도구 요금·세금은 제외합니다.")
                             Text("환산된 토큰 \(total.tokens.formatted()) / 로컬 \(snapshot.tokens(account: account).formatted())")
                             if let rate = pricing.cache.krw {
                                 Text("$1 = ₩\(rate.formatted()) · \(pricing.cache.fxDate ?? "")")
