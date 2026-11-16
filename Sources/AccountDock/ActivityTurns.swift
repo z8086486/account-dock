@@ -15,7 +15,7 @@ enum ActivityTurnsReader {
         let path = home.appendingPathComponent("thread_history_1.sqlite").path
         guard FileManager.default.fileExists(atPath: path) else { return [:] }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else { if let db { sqlite3_close(db) }; return [:] }
+        guard QueryOnlyDatabase.open(path, database: &db) == SQLITE_OK else { if let db { sqlite3_close(db) }; return [:] }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 25)
         sqlite3_progress_handler(db, 20_000, { _ in 1 }, nil)

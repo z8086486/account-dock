@@ -15,7 +15,7 @@ struct ConversationMessage: Identifiable, Sendable {
     let text: String
 }
 
-/// Never opens authentication files or writes to Codex databases.
+/// Reads conversation data with SQL writes blocked; SQLite manages WAL/SHM sidecars.
 actor ConversationReader {
     let home: URL
     let linksURL: URL
@@ -50,7 +50,7 @@ actor ConversationReader {
         let path = home.appendingPathComponent(file)
         guard FileManager.default.fileExists(atPath: path.path) else { throw DockError.message("로컬 대화 저장소를 찾지 못했습니다.") }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(path.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+        guard QueryOnlyDatabase.open(path.path, database: &db) == SQLITE_OK else {
             if let db { sqlite3_close(db) }; throw DockError.message("대화 저장소를 읽지 못했습니다.")
         }
         defer { sqlite3_close(db) }

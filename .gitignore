@@ -167,3 +167,6 @@ __pycache__/
 
 !/assets/conversations.png
 !/assets/activity-history.png
+
+!/Sources/AccountDock/QueryOnlyDatabase.swift
+!/tests/AccountDockTests/QueryOnlyDatabaseTests.swift
