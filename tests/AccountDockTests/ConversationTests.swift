@@ -4,6 +4,38 @@ import XCTest
 @testable import AccountDock
 
 final class ConversationTests: XCTestCase {
+    @MainActor
+    func testNewWindowDiscoveryWhenStatusOmitsWindowAndDeliveryIsScoped() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func window(_ session: String, _ name: String) throws -> URL {
+            let url = root.appendingPathComponent(session).appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: url.appendingPathComponent("exthost/openai.chatgpt"), withIntermediateDirectories: true)
+            try "Started local extension host with pid \(getpid()).\n".write(to: url.appendingPathComponent("renderer.log"), atomically: true, encoding: .utf8)
+            return url
+        }
+        let old = try window("session1", "window1")
+        let before = VSCodeIsolation.windowLogs(in: root)
+        let fresh = try window("session1", "window8")
+        _ = try window("status-invocation", "windowNotAnID")
+        XCTAssertEqual(VSCodeIsolation.windowIDs("0 123 456 window [1] (old)\n0 123 789 window"), [1])
+        XCTAssertEqual(Set(VSCodeIsolation.windowLogs(in: root).subtracting(before).map { $0.resolvingSymlinksInPath().path }), [fresh.resolvingSymlinksInPath().path])
+        XCTAssertEqual(VSCodeIsolation.windowID(from: fresh), 8)
+        XCTAssertFalse(VSCodeIsolation.windowIsReady(fresh))
+        let codex = fresh.appendingPathComponent("exthost/openai.chatgpt/Codex.log")
+        try "Activating Codex extension\n".write(to: codex, atomically: true, encoding: .utf8)
+        XCTAssertTrue(VSCodeIsolation.windowIsReady(fresh))
+        let id = UUID().uuidString.lowercased()
+        let receipt = "2026-11-16 [info] Handling URI path=/local/" + id + "\n"
+        try receipt.write(to: old.appendingPathComponent("exthost/openai.chatgpt/Codex.log"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(VSCodeIsolation.receivedConversation(id, in: fresh))
+        try receipt.write(to: fresh.appendingPathComponent("exthost/openai.chatgpt/Codex.1.log"), atomically: true, encoding: .utf8)
+        XCTAssertTrue(VSCodeIsolation.receivedConversation(id.uppercased(), in: fresh))
+        XCTAssertFalse(VSCodeIsolation.receivedConversation(UUID().uuidString, in: fresh))
+        // A restarted instance can reuse a numeric ID; directory identity must not.
+        let restarted = try window("session2", "window1")
+        XCTAssertTrue(VSCodeIsolation.windowLogs(in: root).subtracting(before).contains { $0.resolvingSymlinksInPath().path == restarted.resolvingSymlinksInPath().path })
+    }
     func testReadOnlyHierarchyAndPaginatedMessages() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)

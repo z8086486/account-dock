@@ -16,8 +16,14 @@ final class ActivityTests: XCTestCase {
         let paused = view.currentPhase()
         XCTAssertEqual(paused, view.currentPhase(at: CACurrentMediaTime() + 100), accuracy: 0.00001)
         XCTAssertNil(view.frameLayer.animationKeys())
+        let resumedAt = CACurrentMediaTime()
         view.configure(count: 4, reduceMotion: false)
-        XCTAssertEqual(view.phase, paused, accuracy: 0.00001)
+        // Layout advances the running phase; bound it by actual elapsed time,
+        // rather than assuming the runner completes configuration in microseconds.
+        let elapsed = CACurrentMediaTime() - resumedAt
+        XCTAssertGreaterThanOrEqual(view.phase, paused)
+        XCTAssertLessThanOrEqual(view.phase - paused,
+            elapsed * 2 * .pi / MenuBarController.rotationDuration(conversations: 4) + 0.000001)
         XCTAssertEqual(try XCTUnwrap(view.frameLayer.animation(forKey: "rotaryFrames")).duration, 2.4, accuracy: 0.00001)
         view.configure(count: 4, reduceMotion: true)
         XCTAssertNil(view.frameLayer.animationKeys())
