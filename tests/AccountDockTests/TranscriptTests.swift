@@ -3,6 +3,33 @@ import WebKit
 @testable import AccountDock
 
 final class TranscriptTests: XCTestCase {
+    @MainActor func testQuotedKoreanEmphasisPreservesLiteralCodeAndMath() async throws {
+        let url = try XCTUnwrap(ConversationTranscript.resourceURL)
+        let view = WKWebView(frame: CGRect(x:0,y:0,width:700,height:480))
+        view.loadFileURL(url, allowingReadAccessTo:url.deletingLastPathComponent())
+        for _ in 0..<100 {
+            if (try? await view.evaluateJavaScript("typeof window.setMessages==='function'")) as? Bool == true { break }
+            try await Task.sleep(for:.milliseconds(100))
+        }
+        let examples: [(String,Int)] = [
+            ("**“모두 더하라”**는 기호이고 **ITE**, **ATE**라고 부릅니다.",3),
+            ("**\"평균\"**이라고 **‘차이’**를 **중요!**입니다.",3),
+            ("그는 \"**강조**라고\" 말했다.",1),
+            ("**앞** 그리고 **“뒤”**는",2),
+            ("**“*중첩*”**도",1),
+            ("`**“코드”**는`\n\n```text\n**“그대로”**는\n```",0),
+            (#"\*\*“문자”\*\*는"#,0),
+            ("**“닫히지 않음”는",0),
+            ("**\"English\"**suffix",0),
+            (#"\(\text{**“수식”**는}\)"#,0)
+        ]
+        for (source,count) in examples {
+            _ = try await view.callAsyncJavaScript("window.setMessages(items,false)",arguments:["items":[["id":"quote","role":"agentMessage","text":source]]],in:nil,contentWorld:.page)
+            let actual = try await view.evaluateJavaScript("document.querySelectorAll('strong').length") as? Int
+            XCTAssertEqual(actual,count,source)
+        }
+    }
+
     @MainActor func testLocalMathRenderingAndFallback() async throws {
         let url = try XCTUnwrap(ConversationTranscript.resourceURL)
         let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 700, height: 640))
