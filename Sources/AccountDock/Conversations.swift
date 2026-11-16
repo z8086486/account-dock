@@ -20,7 +20,33 @@ actor ConversationReader {
     let home: URL
     let linksURL: URL
     init(home: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex"), linksURL: URL = SideChatLinks.url) { self.home = home; self.linksURL = linksURL }
-    private func query(_ file: String, sql: String, values: [String] = []) throws -> [[String]] {
+    private struct ReadFailure: LocalizedError {
+        let code: Int32
+        let detail: String
+        var retryable: Bool { [SQLITE_BUSY, SQLITE_LOCKED, SQLITE_SCHEMA].contains(code & 0xff) }
+        var errorDescription: String? {
+            if retryable { return "Codex가 대화 기록을 갱신 중입니다. 잠시 후 새로고침해 주세요." }
+            if detail.contains("no such table") || detail.contains("no such column") {
+                return "현재 대화 저장소 형식을 지원하지 않습니다. 앱 업데이트를 확인해 주세요."
+            }
+            if code & 0xff == SQLITE_INTERRUPT { return "대화 조회가 지연되고 있습니다. 다시 시도해 주세요." }
+            return "대화 저장소를 읽지 못했습니다. 다시 시도해 주세요. (SQLite \(code))"
+        }
+    }
+    private func query(_ file: String, sql: String, values: [String] = []) async throws -> [[String]] {
+        let delays = [150, 250, 400, 600, 800]
+        for attempt in 0...delays.count {
+            try Task.checkCancellation()
+            do { return try queryOnce(file, sql: sql, values: values) }
+            catch let failure as ReadFailure where failure.retryable && attempt < delays.count {
+                // Close the read connection before yielding; do not hold a read transaction
+                // while Codex finishes its write or schema migration.
+                try await Task.sleep(for: .milliseconds(delays[attempt]))
+            }
+        }
+        throw CancellationError() // Every final attempt returns or throws above.
+    }
+    private func queryOnce(_ file: String, sql: String, values: [String]) throws -> [[String]] {
         let path = home.appendingPathComponent(file)
         guard FileManager.default.fileExists(atPath: path.path) else { throw DockError.message("로컬 대화 저장소를 찾지 못했습니다.") }
         var db: OpaquePointer?
@@ -31,7 +57,11 @@ actor ConversationReader {
         sqlite3_busy_timeout(db, 100)
         sqlite3_progress_handler(db, 2_000_000, { _ in 1 }, nil)
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw DockError.message("현재 대화 저장소 형식을 지원하지 않습니다.") }
+        let prepared = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)
+        guard prepared == SQLITE_OK else {
+            sqlite3_finalize(stmt)
+            throw ReadFailure(code: prepared, detail: String(cString: sqlite3_errmsg(db)))
+        }
         defer { sqlite3_finalize(stmt) }
         for (i, value) in values.enumerated() {
             guard sqlite3_bind_text(stmt, Int32(i + 1), value, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self)) == SQLITE_OK else { throw DockError.message("대화 조회를 준비하지 못했습니다.") }
@@ -45,12 +75,12 @@ actor ConversationReader {
             })
             result = sqlite3_step(stmt)
         }
-        guard result == SQLITE_DONE else { throw DockError.message("대화 조회가 지연되고 있습니다. 다시 시도해 주세요.") }
+        guard result == SQLITE_DONE else { throw ReadFailure(code: result, detail: String(cString: sqlite3_errmsg(db))) }
         return rows
     }
-    func conversations() throws -> [LocalConversation] {
+    func conversations() async throws -> [LocalConversation] {
         let links = try SideChatLinks.read(at: linksURL)
-        return try query("state_5.sqlite", sql: """
+        return try await query("state_5.sqlite", sql: """
             SELECT id, attached_thread_parent_id, COALESCE(NULLIF(name,''),NULLIF(title,''),'제목 없는 대화'), updated_at, archived
             FROM threads WHERE (thread_source = 'user' OR (thread_source IS NULL AND source IN ('vscode','cli','exec')))
             ORDER BY updated_at DESC LIMIT 5000
@@ -60,16 +90,16 @@ actor ConversationReader {
                     title: String(row[2].prefix(300)), updated: Date(timeIntervalSince1970: Double(row[3]) ?? 0), archived: row[4] == "1")
             }
     }
-    func hasChildren(threadID: String) throws -> Bool {
-        if !(try query("state_5.sqlite", sql: "SELECT id FROM threads WHERE attached_thread_parent_id = ? LIMIT 1", values: [threadID])).isEmpty { return true }
+    func hasChildren(threadID: String) async throws -> Bool {
+        if !(try await query("state_5.sqlite", sql: "SELECT id FROM threads WHERE attached_thread_parent_id = ? LIMIT 1", values: [threadID])).isEmpty { return true }
         for (child, parent) in try SideChatLinks.read(at: linksURL) where parent == threadID {
-            if !(try query("state_5.sqlite", sql: "SELECT id FROM threads WHERE id = ? LIMIT 1", values: [child])).isEmpty { return true }
+            if !(try await query("state_5.sqlite", sql: "SELECT id FROM threads WHERE id = ? LIMIT 1", values: [child])).isEmpty { return true }
         }
         return false
     }
-    func messages(threadID: String, before: Int64? = nil) throws -> (messages: [ConversationMessage], cursor: Int64?) {
+    func messages(threadID: String, before: Int64? = nil) async throws -> (messages: [ConversationMessage], cursor: Int64?) {
         guard UUID(uuidString: threadID) != nil else { throw DockError.message("올바른 대화 ID가 아닙니다.") }
-        let rows = try query("thread_history_1.sqlite", sql: """
+        let rows = try await query("thread_history_1.sqlite", sql: """
             SELECT item_id, item_type, CASE WHEN length(item_json) <= 1048576 THEN item_json ELSE '' END, rollout_ordinal
             FROM thread_items WHERE thread_id = ? AND item_type IN ('userMessage','agentMessage') AND rollout_ordinal < ?
             ORDER BY rollout_ordinal DESC LIMIT 60
@@ -100,6 +130,7 @@ struct ConversationExplorer: View {
     @AppStorage("accountDock.conversationAccount") private var account = ""
     @State private var search = ""
     @State private var messages: [ConversationMessage] = []
+    @State private var loadedConversationID: String?
     @State private var cursor: Int64?
     @State private var error: String?
     @State private var loading = false
@@ -291,13 +322,15 @@ struct ConversationExplorer: View {
     }
     private func load(older: Bool = false) async {
         guard let id = selected else { loading = false; return }
-        if !older { messages = []; cursor = nil }
+        if loadedConversationID != id { messages = []; cursor = nil; loadedConversationID = nil }
         loading = true
         do {
             let page = try await reader.messages(threadID: id, before: older ? cursor : nil)
             guard selected == id, !Task.isCancelled else { return }
             if older { messages.insert(contentsOf: page.messages, at: 0) } else { messages = page.messages }
-            cursor = page.cursor; error = nil; loading = false
+            cursor = page.cursor; loadedConversationID = id; error = nil; loading = false
+        } catch is CancellationError {
+            // A newer selection owns the loading state.
         } catch { if selected == id { self.error = error.localizedDescription; loading = false } }
     }
 }

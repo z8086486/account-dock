@@ -4,6 +4,34 @@ import XCTest
 @testable import AccountDock
 
 final class ConversationTests: XCTestCase {
+    @MainActor func testMessageReadRecoversAfterExclusiveWriteLock() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        var writer: OpaquePointer?
+        let path = home.appendingPathComponent("thread_history_1.sqlite").path
+        XCTAssertEqual(sqlite3_open(path, &writer), SQLITE_OK)
+        defer { sqlite3_close(writer) }
+        let id = UUID().uuidString
+        XCTAssertEqual(sqlite3_exec(writer, "CREATE TABLE thread_items(thread_id TEXT,item_id TEXT,item_type TEXT,item_json TEXT,rollout_ordinal INTEGER); INSERT INTO thread_items VALUES('\(id)','message','agentMessage','{\"text\":\"kept\"}',1); BEGIN EXCLUSIVE;", nil, nil, nil), SQLITE_OK)
+        let reader = ConversationReader(home: home)
+        let read = Task { try await reader.messages(threadID: id) }
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(sqlite3_exec(writer, "COMMIT", nil, nil, nil), SQLITE_OK)
+        let page = try await read.value
+        XCTAssertEqual(page.messages.map(\.text), ["kept"])
+        // A lasting lock must report contention, not an unsupported schema.
+        XCTAssertEqual(sqlite3_exec(writer, "BEGIN EXCLUSIVE", nil, nil, nil), SQLITE_OK)
+        do { _ = try await reader.messages(threadID: id); XCTFail("Expected bounded contention failure") }
+        catch {
+            XCTAssertTrue(error.localizedDescription.contains("갱신 중"))
+            XCTAssertFalse(error.localizedDescription.contains("형식"))
+        }
+        XCTAssertEqual(sqlite3_exec(writer, "ROLLBACK", nil, nil, nil), SQLITE_OK)
+        let recovered = try await reader.messages(threadID: id)
+        XCTAssertEqual(recovered.messages.map(\.text), ["kept"])
+    }
+
     @MainActor
     func testNewWindowDiscoveryWhenStatusOmitsWindowAndDeliveryIsScoped() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
