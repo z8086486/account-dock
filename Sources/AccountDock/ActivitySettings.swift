@@ -29,7 +29,7 @@ enum ActivitySettingsReader {
         let path = home.appendingPathComponent("logs_2.sqlite").path
         guard FileManager.default.fileExists(atPath: path) else { return nil }
         var database: OpaquePointer?
-        guard sqlite3_open_v2(path, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+        guard QueryOnlyDatabase.open(path, database: &database) == SQLITE_OK else {
             if let database { sqlite3_close(database) }
             return nil
         }
