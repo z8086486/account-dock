@@ -170,3 +170,5 @@ __pycache__/
 
 !/Sources/AccountDock/QueryOnlyDatabase.swift
 !/tests/AccountDockTests/QueryOnlyDatabaseTests.swift
+
+!/licenses/KaTeX-LICENSE.txt

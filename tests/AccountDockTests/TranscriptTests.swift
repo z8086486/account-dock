@@ -3,6 +3,63 @@ import WebKit
 @testable import AccountDock
 
 final class TranscriptTests: XCTestCase {
+    @MainActor func testLocalMathRenderingAndFallback() async throws {
+        let url = try XCTUnwrap(ConversationTranscript.resourceURL)
+        let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 700, height: 640))
+        view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        for _ in 0..<100 {
+            if (try? await view.evaluateJavaScript("typeof window.setMessages==='function'")) as? Bool == true { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let sample = #"""
+        세 사람의 평균 효과는 다음과 같습니다.
+
+        \[
+        \frac{10+5+0}{3}=5
+        \]
+
+        즉, 교육이 점수를 평균 **5점** 높였습니다.
+
+        인라인 \(x_i^2 + \alpha\) 및 $E=mc^2$.
+
+        $$
+        \begin{aligned}
+        a &= b+c \\
+        \sigma &= \sqrt{\frac{1}{n}\sum_{i=1}^{n}(x_i-\mu)^2}
+        \end{aligned}
+        $$
+
+        | 항목 | 값 |
+        | --- | --- |
+        | 평균 | $\bar{x}=5$ |
+
+        `\(code\)`와 `$literal$`는 코드입니다. 가격은 $20와 $30입니다.
+
+        ```tex
+        \[not rendered\]
+        ```
+        \(\notARealCommand{<img src=x onerror=alert(1)>}\)
+        \(\href{javascript:alert(1)}{x}\)
+        \(\includegraphics{https://example.com/track}\)
+        """#
+        _ = try await view.callAsyncJavaScript("window.setMessages(items,false); await document.fonts.ready; window.scrollTo(0,0)", arguments: ["items": [["id":"math","role":"agentMessage","text":sample]]], in:nil, contentWorld:.page)
+        let result = try await view.evaluateJavaScript("({math:document.querySelectorAll('.katex').length,display:document.querySelectorAll('.katex-display').length,fallback:document.querySelectorAll('.math-fallback').length,code:document.querySelector('pre code').textContent,inline:document.querySelector('code').textContent,table:document.querySelectorAll('table .katex').length,safe:!document.querySelector('img,a[href^=\"javascript:\"]'),fonts:[...document.fonts].filter(f=>f.family.startsWith('KaTeX')&&f.status==='loaded').length,currency:document.body.textContent.includes('$20와 $30')})") as? [String:Any]
+        XCTAssertGreaterThanOrEqual(result?["math"] as? Int ?? 0, 5)
+        XCTAssertEqual(result?["display"] as? Int, 2)
+        XCTAssertGreaterThanOrEqual(result?["fallback"] as? Int ?? 0, 1)
+        XCTAssertEqual(result?["code"] as? String, "\\[not rendered\\]\n")
+        XCTAssertEqual(result?["inline"] as? String, "\\(code\\)")
+        XCTAssertEqual(result?["table"] as? Int, 1)
+        XCTAssertEqual(result?["safe"] as? Bool, true)
+        XCTAssertEqual(result?["currency"] as? Bool, true)
+        XCTAssertGreaterThan(result?["fonts"] as? Int ?? 0, 0)
+        if let path = ProcessInfo.processInfo.environment["ACCOUNT_DOCK_MATH_SNAPSHOT"] {
+            let image = try await view.takeSnapshot(configuration:nil)
+            let bitmap = try XCTUnwrap(NSBitmapImageRep(data:try XCTUnwrap(image.tiffRepresentation)))
+            try bitmap.representation(using:.png,properties:[:])?.write(to: URL(fileURLWithPath:path))
+        }
+    }
+
     @MainActor func testMarkdownAndInertContent() async throws {
         let url = try XCTUnwrap(ConversationTranscript.resourceURL)
         let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 700, height: 600))

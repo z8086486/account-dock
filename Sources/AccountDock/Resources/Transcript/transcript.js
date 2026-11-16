@@ -1,5 +1,6 @@
 'use strict';
 const md=window.markdownit({html:false,linkify:false,typographer:false});
+window.installTranscriptMath(md);
 // Conversation content cannot execute HTML or load external resources.
 md.renderer.rules.image=(tokens,i)=>md.utils.escapeHtml('[이미지: '+tokens[i].content+']');
 const host=document.getElementById('messages'),ask=document.getElementById('ask');
