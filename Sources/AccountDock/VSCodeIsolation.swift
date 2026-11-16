@@ -212,6 +212,51 @@ enum VSCodeIsolation {
             Range($0.range(at: 1), in: status).flatMap { Int(status[$0]) }
         })
     }
+    static func windowID(from directory: URL) -> Int? {
+        let name = directory.lastPathComponent
+        guard name.hasPrefix("window"), let id = Int(name.dropFirst(6)), id > 0,
+              name == "window\(id)" else { return nil }
+        return id
+    }
+    static func windowLogs(in logs: URL) -> Set<URL> {
+        let fm = FileManager.default
+        let sessions = (try? fm.contentsOfDirectory(at: logs, includingPropertiesForKeys: nil)) ?? []
+        var result = Set<URL>()
+        for session in sessions {
+            for directory in (try? fm.contentsOfDirectory(at: session, includingPropertiesForKeys: nil)) ?? [] {
+                if windowID(from: directory) != nil,
+                   fm.fileExists(atPath: directory.appendingPathComponent("renderer.log").path) {
+                    result.insert(directory)
+                }
+            }
+        }
+        return result
+    }
+    private static func logTail(_ url: URL) -> String {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return "" }
+        try? handle.seek(toOffset: size > 262_144 ? size - 262_144 : 0)
+        return String(decoding: (try? handle.readToEnd()) ?? Data(), as: UTF8.self)
+    }
+    static func windowIsReady(_ directory: URL) -> Bool {
+        let renderer = logTail(directory.appendingPathComponent("renderer.log"))
+        let pattern = #"Started local extension host with pid (\d+)\."#
+        let regex = try! NSRegularExpression(pattern: pattern)
+        guard let match = regex.matches(in: renderer, range: NSRange(renderer.startIndex..., in: renderer)).last,
+              let range = Range(match.range(at: 1), in: renderer), let pid = Int32(renderer[range]),
+              kill(pid, 0) == 0 else { return false }
+        return logTail(directory.appendingPathComponent("exthost/openai.chatgpt/Codex.log"))
+            .contains("Activating Codex extension")
+    }
+    static func receivedConversation(_ id: String, in directory: URL) -> Bool {
+        let logs = directory.appendingPathComponent("exthost/openai.chatgpt")
+        return ((try? FileManager.default.contentsOfDirectory(at: logs, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.lastPathComponent == "Codex.log" || $0.lastPathComponent.hasPrefix("Codex.") && $0.pathExtension == "log" }
+            .contains { logTail($0).split(separator: "\n").contains { line in
+                line.hasSuffix("Handling URI path=/local/" + id.lowercased())
+            } }
+    }
     private static func command(_ workspace: Workspace, arguments: [String]) async throws -> String {
         let task = Process()
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -234,19 +279,29 @@ enum VSCodeIsolation {
     static func launch(_ workspace: Workspace, conversationID: String? = nil) async throws {
         if let conversationID {
             _ = try conversationURL(conversationID)
-            let before = try isRunning(workspace) ? windowIDs(try await command(workspace, arguments: ["--status"])) : []
+            // --status can omit live windows. Renderer log directories use the actual
+            // windowId (VS Code's windowLogsPath), scoped to this account's instance.
+            let logs = workspace.userData.appendingPathComponent("logs")
+            let before = windowLogs(in: logs)
             _ = try await command(workspace, arguments: ["--new-window", "--skip-welcome", "--skip-release-notes"])
-            for _ in 0..<10 {
-                let current = windowIDs(try await command(workspace, arguments: ["--status"]))
-                let added = current.subtracting(before)
+            let deadline = Date().addingTimeInterval(30)
+            while Date() < deadline {
+                try Task.checkCancellation()
+                let added = windowLogs(in: logs).subtracting(before)
                 guard added.count <= 1 else { throw DockError.message("새 창이 여러 개 감지되어 대화 링크를 보내지 않았습니다.") }
-                if let id = added.first {
+                if let window = added.first, let id = windowID(from: window), windowIsReady(window) {
                     _ = try await command(workspace, arguments: ["--open-url", conversationURL(conversationID, windowID: id)])
-                    return
+                    let deliveryDeadline = Date().addingTimeInterval(20)
+                    while Date() < deliveryDeadline {
+                        try Task.checkCancellation()
+                        if receivedConversation(conversationID, in: window) { return }
+                        try await Task.sleep(for: .milliseconds(250))
+                    }
+                    throw DockError.message("새 창은 열렸지만 Codex의 대화 링크 수신을 확인하지 못했습니다. 확장이 준비된 뒤 다시 시도해 주세요.")
                 }
-                try await Task.sleep(for: .milliseconds(300))
+                try await Task.sleep(for: .milliseconds(250))
             }
-            throw DockError.message("새 VS Code 창을 확인하지 못해 기존 창으로 대화를 보내지 않았습니다.")
+            throw DockError.message("새 VS Code 창의 준비를 확인하지 못해 대화를 보내지 않았습니다.")
         }
         let home = workspace.home, userData = workspace.userData
         let task = Process()
