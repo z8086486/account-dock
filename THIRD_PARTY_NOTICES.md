@@ -29,3 +29,12 @@ and external image loading disabled. No remote scripts are loaded.
 
 Bundled browser dependencies (mdurl, uc.micro, linkify-it, punycode.js, entities):
 [upstream license notices](licenses/markdown-it-dependencies.txt).
+
+## KaTeX 0.19.1
+
+The conversation reader renders TeX formulas with bundled KaTeX scripts, styles,
+and fonts. Rendering is local; no CDN or external requests are used.
+
+- Source: https://github.com/KaTeX/KaTeX/tree/v0.19.1
+- License: [MIT](licenses/KaTeX-LICENSE.txt)
+- Bundled distribution: `katex@0.19.1/dist` (browser script, CSS, fonts).
