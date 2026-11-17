@@ -172,3 +172,6 @@ __pycache__/
 !/tests/AccountDockTests/QueryOnlyDatabaseTests.swift
 
 !/licenses/KaTeX-LICENSE.txt
+
+!/Sources/AccountDock/RolloutMessages.swift
+!/tests/AccountDockTests/LiveRefreshTests.swift

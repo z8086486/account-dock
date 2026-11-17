@@ -454,6 +454,10 @@ enum ActivityOwnership {
     static func unique(_ candidates: [URL: Set<String>]) -> [URL: String] {
         candidates.compactMapValues { $0.count == 1 ? $0.first : nil }
     }
+    static func isCurrentWriter(flags: UInt32, offset: Int64, size: UInt64) -> Bool {
+        // proc_fileinfo uses kernel FWRITE (0x2), not userspace O_WRONLY.
+        flags & 2 != 0 && offset >= 0 && UInt64(offset) == size
+    }
     static func read() -> [URL: String] {
         let capacity = proc_listallpids(nil, 0)
         guard capacity > 0, capacity < 100_000 else { return [:] }
@@ -488,6 +492,12 @@ enum ActivityOwnership {
                     $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
                 }
                 guard name.hasSuffix(".jsonl"), name.contains("/sessions/") || name.contains("/archived_sessions/") else { continue }
+                // Stale resumed sessions retain append handles. Only the writer whose
+                // descriptor reached the current end is evidence of current ownership.
+                guard let attributes = try? FileManager.default.attributesOfItem(atPath: name),
+                      let length = attributes[.size] as? NSNumber,
+                      isCurrentWriter(flags: info.pfi.fi_openflags, offset: info.pfi.fi_offset,
+                                      size: length.uint64Value) else { continue }
                 candidates[URL(fileURLWithPath: name).resolvingSymlinksInPath(), default: []].insert(account)
             }
         }
