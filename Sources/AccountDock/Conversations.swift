@@ -104,7 +104,7 @@ actor ConversationReader {
             FROM thread_items WHERE thread_id = ? AND item_type IN ('userMessage','agentMessage') AND rollout_ordinal < ?
             ORDER BY rollout_ordinal DESC LIMIT 60
             """, values: [threadID, String(before ?? Int64.max)])
-        let messages = rows.reversed().map { row -> ConversationMessage in
+        var messages = rows.reversed().map { row -> ConversationMessage in
             guard let data = row[2].data(using: .utf8), let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
                 return ConversationMessage(id: row[0], role: row[1], text: "이 메시지는 크기 또는 형식 때문에 표시할 수 없습니다.")
             }
@@ -117,6 +117,14 @@ actor ConversationReader {
                 }.joined(separator: "\n")
             }
             return ConversationMessage(id: row[0], role: row[1], text: text)
+        }
+        if let path = try? await query("state_5.sqlite", sql: "SELECT rollout_path FROM threads WHERE id = ?", values: [threadID]).first?.first {
+            let lower = rows.last.flatMap { Int64($0[3]) } ?? 0
+            let live = try RolloutMessages.read(URL(fileURLWithPath: path), after: lower - 1,
+                                                before: before ?? Int64.max)
+            var indexed = Dictionary(uniqueKeysWithValues: zip(rows.reversed(), messages).map { ($0.1.id, (Int64($0.0[3]) ?? 0, $0.1)) })
+            for entry in live { indexed[entry.1.id] = entry }
+            messages = indexed.values.sorted { $0.0 < $1.0 }.map { $0.1 }
         }
         return (messages, rows.count == 60 ? Int64(rows.last![3]) : nil)
     }
