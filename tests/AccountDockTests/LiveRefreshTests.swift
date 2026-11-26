@@ -48,5 +48,8 @@ final class LiveRefreshTests: XCTestCase {
         XCTAssertEqual(page.messages.map(\.text), ["question", "complete answer", "new question", "latest answer"])
         let older = try RolloutMessages.read(log, after: 1999, before: 2003)
         XCTAssertEqual(older.sorted { $0.0 < $1.0 }.map { $0.1.id }, ["u1", "a1"])
+        try FileManager.default.removeItem(at: log)
+        let indexed = try await ConversationReader(home: home).messages(threadID: id)
+        XCTAssertEqual(indexed.messages.map(\.text), ["question", "old projection"])
     }
 }
