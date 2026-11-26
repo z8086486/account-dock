@@ -5,7 +5,13 @@ import Foundation
 /// and must not be displayed as conversation messages.
 enum RolloutMessages {
     static func read(_ url: URL, after: Int64, before: Int64) throws -> [(Int64, ConversationMessage)] {
-        let handle = try FileHandle(forReadingFrom: url)
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forReadingFrom: url)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+            // Codex can retain the indexed conversation after removing its rollout.
+            return []
+        }
         defer { try? handle.close() }
         let size = try handle.seekToEnd()
         var end = size
